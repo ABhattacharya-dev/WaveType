@@ -11,7 +11,7 @@ import sounddevice as sd
 
 RUNTIME = Path(__file__).resolve().parent / "runtime"
 TERMS_FILE = RUNTIME.parent / "personal_terms.json"
-SHORTCUT = re.compile(r"\binsert\s+my\s+(name|email|address)\b", re.IGNORECASE)
+SHORTCUT = re.compile(r"\binsert\s+my\s+(second\s+email|name|email|address)\b", re.IGNORECASE)
 
 
 def replace_shortcuts(text):
@@ -31,7 +31,7 @@ def replace_shortcuts(text):
     missing = set()
 
     def replace(match):
-        key = match.group(1).lower()
+        key = " ".join(match.group(1).lower().split())
         value = terms.get(key)
         if not isinstance(value, str) or not value.strip():
             missing.add(key)

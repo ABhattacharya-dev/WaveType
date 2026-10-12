@@ -31,11 +31,12 @@ Create `personal_terms.json` beside `stt.py` and edit its values:
 {
   "name": "Your Full Name",
   "email": "you@example.com",
+  "second email": "you.second@example.com",
   "address": "Your Street Address"
 }
 ```
 
-Say “insert my name,” “insert my email,” or “insert my address” during recording. Only those commands are replaced; ordinary phrases such as “my name, that's my name” remain unchanged. The file is ignored by Git so your personal details stay local. If a value is blank or missing, the command stays in the transcript and a short error is printed.
+Say “insert my name,” “insert my email,” “insert my second email,” or “insert my address” during recording. Only those commands are replaced; ordinary phrases such as “my name, that's my name” remain unchanged. The file is ignored by Git so your personal details stay local. If a value is blank or missing, the command stays in the transcript and a short error is printed.
 
 ## Run
 
