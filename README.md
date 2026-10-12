@@ -1,107 +1,75 @@
-# STT Core Structure
+# STT engine
 
-Offline terminal speech-to-text using Parakeet Redux.
+Local Windows 10/11 dictation with Parakeet Redux transcription, optional Qwen cleanup, a resident engine, and a terminal client. No UI is included. Runtime inference is offline after first-run downloads.
 
-## Setup
+## Install
 
 ```powershell
-git clone -b feature https://github.com/ABhattacharya-dev/stt-core-structure.git
+git clone -b engine https://github.com/ABhattacharya-dev/stt-core-structure.git
 cd stt-core-structure
-
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 ```
 
-Download the model into `runtime`:
+Start the terminal client with `python stt.py`. On first run the engine downloads the Parakeet GGUF and its small Windows C API library, resumes interrupted downloads, and verifies SHA-256. `runtime/parakeet-cli.exe` is included as a fallback. Answer `y` at **Smart cleanup? [y/N]:** to download and warm Qwen3 4B plus the verified llama.cpp runtime. The NVIDIA package includes CUDA runtime DLLs; it does not require an installed CUDA toolkit. A CPU package is selected when no suitable NVIDIA GPU is found. Model and runtime files are ignored by Git. Subsequent runs need no internet.
+
+The engine remains running after the CLI exits and unloads the cleanup model after five idle minutes. Stop it with:
 
 ```powershell
-Invoke-WebRequest `
-  -Uri "https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/redux-q8_0.gguf?download=true" `
-  -OutFile "runtime\redux-q8_0.gguf"
+python -c "from client import EngineClient; c=EngineClient(); c.command('shutdown'); c.close()"
 ```
 
-The model is about 942 MB and is used locally after download.
+The CLI prompts for Enter to start and Enter to stop. `python stt.py --show-raw` also prints the raw transcript. Only the final text is printed normally. Cleanup can resolve spoken corrections, grammar and punctuation, and JSON beginning with “write in JSON format.” Invalid or unsafe cleanup falls back to the transcript with snippets applied.
 
-## Personal shortcuts
+## Personal terms
 
-Create `personal_terms.json` beside `stt.py` and edit its values:
+Create `personal_terms.json` beside `stt.py` for deliberate snippets:
 
 ```json
-{
-  "name": "Your Full Name",
-  "email": "you@example.com",
-  "second email": "you.second@example.com",
-  "address": "Your Street Address",
-  "phone number": "+1 555 0100"
-}
+{"name":"Your Full Name","second email":"you@example.com","phone number":"+1 555 0100"}
 ```
 
-Each JSON key is a spoken shortcut: say “insert my” followed by the key, such as “insert my phone number.” Add any key you want, including names with several words. Longer configured keys take priority when names overlap. Ordinary phrases such as “my name, that's my name” remain unchanged. The file is ignored by Git so your personal details stay local. If a configured value is blank, the command stays in the transcript and a short error is printed.
-
-## Run
-
-```powershell
-python stt.py
-```
-
-Answer `y` to enable smart cleanup, or press Enter / answer `n` for normal transcription. Press Enter to start recording. Press Enter again to stop and print the transcript.
-
-To diagnose an incorrect result from the same recording, run `python stt.py --show-raw` and answer `y`. This also prints `Raw transcript: ...` before cleanup. History still saves only the final result. Missing words in the raw transcript cannot be reliably recovered by cleanup.
-
-## Optional smart cleanup (Windows NVIDIA)
-
-Download the llama.cpp CUDA runtime and Qwen3 4B Instruct Q4 model (about 2.5 GB) once:
-
-```powershell
-New-Item -ItemType Directory -Force runtime\smart | Out-Null
-$release = "https://github.com/ggml-org/llama.cpp/releases/download/b11564"
-curl.exe -L --fail "$release/llama-b11564-bin-win-cuda-12.4-x64.zip" -o "$env:TEMP\stt-llama.zip"
-Expand-Archive "$env:TEMP\stt-llama.zip" -DestinationPath runtime\smart -Force
-curl.exe -L --fail "$release/cudart-llama-bin-win-cuda-12.4-x64.zip" -o "$env:TEMP\stt-cudart.zip"
-Expand-Archive "$env:TEMP\stt-cudart.zip" -DestinationPath runtime\smart -Force
-curl.exe -L --fail "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf?download=true" -o runtime\Qwen3-4B-Instruct-2507-Q4_K_M.gguf
-```
-
-After setup, everything runs offline. Answering `y` loads and warms the model before recording and uses the NVIDIA GPU for cleanup. This uses about 3.1 GB of GPU memory on the tested GTX 1650. The local server closes when the script exits. Answering `n` does not load it.
-
-Cleanup fixes grammar and punctuation and resolves corrections such as “meet at eight, sorry, seven.” Start with **“write in JSON format”** to dictate JSON, including nested objects, arrays and explicit numbers/booleans/null. Say “end user object” (using your object's name) to make nesting boundaries explicit. Ambiguous values and phone numbers stay strings. Personal shortcuts keep their exact saved values.
-
-Only the final result is printed and saved in history. Missing runtime/model, failed cleanup, invalid JSON, changed shortcuts or a 10-second request timeout fall back to the normal transcript with a short warning. Long dictations that exceed the conservative context limit also use normal transcription. Cleanup can misinterpret meaning; valid JSON does not guarantee correct values.
-
-Run the offline fixture benchmark without recording or changing history:
-
-```powershell
-python -m unittest test_smart
-python benchmark_smart.py --runs 3
-```
-
-The benchmark measures model startup separately and writes outputs, fixture checks and cleanup timings to ignored `benchmark-results.json`. Alternative GGUF models can be measured with `--model path\to\model.gguf`.
-
-### Measured results
-
-Initial benchmark before prompt refinement: GTX 1650 4 GB / Ryzen 7 4800H, 25 text fixtures repeated three times, October 12, 2026. These are cleanup checks, not a general speech-recognition accuracy score. All models used the same prompts and fixtures in this comparison.
-
-| Model | Checks passed | Median cleanup | Slowest cleanup |
-| --- | ---: | ---: | ---: |
-| Qwen3 4B Instruct Q4 (selected) | 69/75 | 1.30 s | 2.02 s |
-| Qwen3 1.7B Q8 | 39/75 | 0.63 s | 0.95 s |
-| Qwen2.5 1.5B Instruct Q4 | 30/75 | 0.51 s | 0.79 s |
-
-The selected model passed all grammar and meaning-preservation fixtures. Two cases failed consistently: “Monday, sorry Tuesday” retained Monday, and a JSON quantity correction from eight to six retained eight. Review corrected dates and numbers. JSON validation checks structure, not meaning.
-
-Selected-model startup including warmup took 4.92 seconds in the final run, before recording; first-time GPU initialization took tens of seconds. The 1–3-second target applies to short-text cleanup after transcription, not startup or long dictations.
-
-Six focused unit tests, 12 live shortcut checks (including escaped JSON values), and the full fixture-audio-to-history flow passed. The live microphone was not retested.
-
-After refining the text prompt to apply replacements in place, a 29-case run passed 27 strict checks, with 1.47-second median and 1.87-second maximum cleanup. “A new card—actually, a new phone” now keeps only the phone, and “tomorrow not tomorrow make it today” becomes “Let's see you today.” The Monday-to-Tuesday case also passed. Remaining failures were awkward “at sharp 7 PM” wording and the unchanged JSON quantity error. The JSON prompt was not changed in this refinement.
-
-## History
-
-Final transcripts, including expanded shortcuts, are saved locally in `history/YYYY-MM-DD.jsonl` beside `stt.py`. Each date has its own file, containing one JSON record per transcription:
+Say “insert my” followed by any key. Ordinary mentions stay unchanged. Create `personal_vocabulary.json` separately for exact recognition aliases:
 
 ```json
-{"time": "14:30:05+05:30", "text": "Your transcribed text."}
+{"Parakeet Redux":["parakeet redox"],"Your Name":["your name as Parakeet often hears it"]}
 ```
 
-Dates and times use your computer's local timezone; the time includes its UTC offset. Blank transcripts are skipped. New entries are appended without reading older history, after the transcript is printed. If saving fails, a short error is shown and the transcript remains available in the terminal. History includes any inserted personal details and is ignored by Git.
+Parakeet's current CLI has no hotword parameter. Vocabulary aliases correct known misrecognitions after ASR; they do not change decoding. Keep aliases specific to avoid replacing unrelated speech. Both personal files are ignored by Git.
+
+## Engine, replay and evaluation
+
+```powershell
+python engine.py serve --hotkey
+python demo_engine.py path\to\clip.wav
+python evaluate.py path\to\clip.wav --smart --tier auto --warmup
+python evaluate.py path\to\clip.wav --smart --tier cpu --warmup
+python evaluate.py --manifest recordings.jsonl
+python -m unittest test_smart test_engine
+```
+
+The hotkey defaults to Ctrl+Win. Hold the chord to record and release to send. A future client can set tap mode over IPC: first press locks, second press sends. Hotkey results type into the focused app with Unicode `SendInput`; the clipboard is untouched. Windows may block insertion into an elevated target. The final text remains in history even if insertion fails. The full client protocol is in [docs/IPC.md](docs/IPC.md), and design choices are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+For WER, create `recordings.jsonl` with one object per line:
+
+```json
+{"wav":"clip1.wav","reference":"the exact words you spoke"}
+```
+
+Replay requires mono 16-bit PCM WAV. The report includes p50/p95 stage latency, raw/final text and WER against the raw ASR output. WER only becomes meaningful with your own labeled recordings.
+
+History is stored in ignored `history/YYYY-MM-DD.jsonl`. New records keep the old `time` and `text` fields and add `raw`, `cleaned`, `timings`, foreground `app`, and recording `mode`. Old history remains readable. Logs and the IPC endpoint are under `%LOCALAPPDATA%\STTCore`.
+
+## Measured on this machine
+
+GTX 1650 4 GB / Ryzen 7 4800H, one seven-second sample WAV replayed three measured times, October 12, 2026. The resident engine used one extra warmup replay. The prior script path was measured with prompt caching disabled and model startup reported separately. Times below are from replay release to text, excluding model startup and audio duration:
+
+| Path | ASR p50/p95 | Cleanup p50/p95 | Release to ready p50/p95 |
+| --- | --- | --- | --- |
+| Prior GPU | 1.28/1.28 s | 4.77/4.78 s | 6.04/6.05 s |
+| Engine GPU | 0.70/0.72 s | 0.96/0.98 s | 1.69/1.69 s |
+| Prior CPU simulation | 1.40/1.83 s | 10.01/10.02 s timeout | 11.42/11.84 s, raw fallback |
+| Engine CPU-only | 0.74/0.86 s | 3.02/3.05 s | 3.76/3.94 s |
+
+Enabling prompt caching cut a short correction's GPU cleanup from about 4.0 s to 0.24–0.43 s after warmup; CPU cleanup took 1.21 s on the same short correction after a 13.94 s startup. The 32-case text fixture benchmark passed 29 cases with 0.404 s median cleanup. Its misses were a grammar singular/plural change, one extra comma, and a JSON quantity correction that kept the old number. Valid JSON can still be semantically wrong. Redux cannot use `parakeet-cli --stream`; its CLI reports that the model is not cache-aware. Pauses can be transcribed in the background, but the final segment still incurs ASR work at release. An official 213 MB packed Redux model produced the same sample text but took 25–27 s per clip on this CPU/build, so Q8 remains the default.

@@ -1,16 +1,10 @@
 import argparse
-import io
 import json
 import re
-import subprocess
 import sys
-import wave
-from datetime import datetime
 from pathlib import Path
 
-import sounddevice as sd
-
-from smart import restore, smart_session
+from smart import restore
 
 
 RUNTIME = Path(__file__).resolve().parent / "runtime"
@@ -19,21 +13,7 @@ HISTORY_DIR = RUNTIME.parent / "history"
 SHORTCUT_START = re.compile(r"\binsert\s+my\s+", re.IGNORECASE)
 
 
-def save_history(text):
-    if not text.strip():
-        return
-
-    now = datetime.now().astimezone()
-    entry = {"time": now.timetz().isoformat(timespec="seconds"), "text": text}
-    try:
-        HISTORY_DIR.mkdir(exist_ok=True)
-        with (HISTORY_DIR / f"{now.date().isoformat()}.jsonl").open("a", encoding="utf-8") as history:
-            history.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except OSError as exc:
-        print(f"Could not save history: {exc}", file=sys.stderr)
-
-
-def replace_shortcuts(text, protect=None):
+def replace_shortcuts(text, protect=None, on_error=None):
     if not SHORTCUT_START.search(text):
         return text
 
@@ -42,16 +22,16 @@ def replace_shortcuts(text, protect=None):
     except FileNotFoundError:
         terms = {}
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise SystemExit(f"Cannot read {TERMS_FILE.name}: {exc}") from exc
+        raise ValueError(f"Cannot read {TERMS_FILE.name}: {exc}") from exc
 
     if not isinstance(terms, dict):
-        raise SystemExit(f"{TERMS_FILE.name} must contain a JSON object.")
+        raise ValueError(f"{TERMS_FILE.name} must contain a JSON object.")
 
     shortcuts = {}
     for key, value in terms.items():
         normalized = " ".join(key.lower().split())
         if not normalized or normalized in shortcuts:
-            raise SystemExit(f"{TERMS_FILE.name} contains a blank or duplicate key: {key!r}")
+            raise ValueError(f"{TERMS_FILE.name} contains a blank or duplicate key: {key!r}")
         shortcuts[normalized] = value
 
     if not shortcuts:
@@ -73,13 +53,17 @@ def replace_shortcuts(text, protect=None):
 
     result = shortcut.sub(replace, text)
     for key in sorted(missing):
-        print(f"No saved value for {key} in {TERMS_FILE.name}.", file=sys.stderr)
+        message = f"No saved value for {key} in {TERMS_FILE.name}."
+        if on_error:
+            on_error(message)
+        else:
+            print(message, file=sys.stderr)
     return result
 
 
-def format_transcript(text, cleaner=None):
+def format_transcript(text, cleaner=None, on_error=None):
     if cleaner is None or not text.strip():
-        return replace_shortcuts(text)
+        return replace_shortcuts(text, on_error=on_error)
     values = {}
 
     def protect(value):
@@ -91,45 +75,15 @@ def format_transcript(text, cleaner=None):
         values[marker] = value
         return marker
 
-    protected = replace_shortcuts(text, protect)
+    protected = replace_shortcuts(text, protect, on_error)
     try:
         return cleaner.clean(protected, values)
     except (OSError, ValueError, KeyError, IndexError, TypeError, RecursionError):
-        print("Smart cleanup failed; using original transcript.", file=sys.stderr)
+        if on_error:
+            on_error("Smart cleanup failed; using original transcript.")
+        else:
+            print("Smart cleanup failed; using original transcript.", file=sys.stderr)
         return restore(protected, values)
-
-
-def transcribe():
-    chunks = []
-    sample_rate = int(sd.query_devices(kind="input")["default_samplerate"])
-
-    def record(indata, frames, time, status):
-        if status:
-            print(status, file=sys.stderr)
-        chunks.append(bytes(indata))
-
-    input("Press Enter to record...")
-    with sd.RawInputStream(samplerate=sample_rate, channels=1, dtype="int16", callback=record):
-        input("Recording. Press Enter to stop...")
-
-    if not chunks:
-        raise SystemExit("No audio recorded.")
-
-    audio = io.BytesIO()
-    with wave.open(audio, "wb") as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(sample_rate)
-        wav.writeframes(b"".join(chunks))
-
-    result = subprocess.run(
-        [str(RUNTIME / "parakeet-cli.exe"), "transcribe", "--model", str(RUNTIME / "redux-q8_0.gguf"), "--input", "-", "--threads", "8"],
-        input=audio.getvalue(),
-        capture_output=True,
-    )
-    if result.returncode:
-        raise SystemExit(result.stderr.decode(errors="replace").strip())
-    return result.stdout.decode(errors="replace").strip()
 
 
 def main(argv=None):
@@ -140,7 +94,13 @@ def main(argv=None):
     from client import EngineClient
     client = EngineClient(start=True)
     try:
-        client.command("settings", mode="hold", smart=enabled)
+        try:
+            client.command("settings", mode="hold", smart=enabled)
+        except RuntimeError as exc:
+            if not enabled:
+                raise
+            print(f"Smart cleanup unavailable: {exc}", file=sys.stderr)
+            client.command("settings", mode="hold", smart=False)
         client.command("subscribe")
         input("Press Enter to record...")
         client.command("start")

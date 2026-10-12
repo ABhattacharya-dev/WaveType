@@ -6,6 +6,7 @@ personal_vocabulary.json
 history/
 runtime/smart/
 runtime/smart-cpu/
+runtime/parakeet-lib/
 runtime/*.zip
 runtime/*.part
 benchmark-results*.json

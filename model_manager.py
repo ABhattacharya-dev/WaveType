@@ -1,6 +1,7 @@
 """Pinned, resumable first-run downloads; never used after files are installed."""
 
 import hashlib
+import ctypes
 import os
 import shutil
 import subprocess
@@ -14,6 +15,8 @@ import stt
 
 ASR = ("https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/redux-q8_0.gguf",
        "3429a4598946c406dbb4af5bb589d4dd307b069d550d98e24bef6779c4e6988f")
+ASR_LIBRARY = ("https://github.com/mudler/parakeet.cpp/releases/download/v0.6.1/parakeet-v0.6.1-lib-win-cpu-x64.zip",
+               "95b41515efeab246094d1793a1c0a12d727bc1cc01e4c28fe37a16a994b26774")
 CLEANUP = ("https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
            "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597")
 RELEASE = "https://github.com/ggml-org/llama.cpp/releases/download/b11564/"
@@ -36,6 +39,9 @@ def fetch(path, url, expected):
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(path.name + ".part")
+    if partial.exists() and _sha256(partial) == expected:
+        partial.replace(path)
+        return path
     offset = partial.stat().st_size if partial.exists() else 0
     request = urllib.request.Request(url, headers={"Range": f"bytes={offset}-"} if offset else {})
     with urllib.request.urlopen(request, timeout=60) as response:
@@ -43,6 +49,7 @@ def fetch(path, url, expected):
         with partial.open("ab" if append else "wb") as output:
             shutil.copyfileobj(response, output, 1024 * 1024)
     if _sha256(partial) != expected:
+        partial.unlink(missing_ok=True)
         raise ValueError(f"download integrity check failed: {path.name}")
     partial.replace(path)
     return path
@@ -57,10 +64,31 @@ def gpu_available():
         return False
 
 
+def free_memory_gb():
+    if os.name != "nt":
+        return float("inf")
+    class MEMORYSTATUSEX(ctypes.Structure):
+        _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong)] + [
+            (name, ctypes.c_ulonglong) for name in (
+                "ullTotalPhys", "ullAvailPhys", "ullTotalPageFile", "ullAvailPageFile",
+                "ullTotalVirtual", "ullAvailVirtual", "ullAvailExtendedVirtual")]
+    state = MEMORYSTATUSEX()
+    state.dwLength = ctypes.sizeof(state)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(state)):
+        return float("inf")
+    return state.ullAvailPhys / (1024 ** 3)
+
+
 def ensure_asr():
     fetch(stt.RUNTIME / "redux-q8_0.gguf", *ASR)
     if not (stt.RUNTIME / "parakeet-cli.exe").is_file():
         raise FileNotFoundError("parakeet-cli.exe is missing from runtime")
+    library = stt.RUNTIME / "parakeet-lib" / "parakeet-v0.6.1-lib-win-cpu-x64" / "parakeet.dll"
+    if not library.is_file():
+        archive = fetch(stt.RUNTIME / "parakeet-lib.zip", *ASR_LIBRARY)
+        _extract(archive, stt.RUNTIME / "parakeet-lib")
+        archive.unlink(missing_ok=True)
+    return library
 
 
 def _extract(archive, destination):
@@ -78,9 +106,11 @@ def _extract(archive, destination):
                     shutil.copyfileobj(source, output)
 
 
-def ensure_cleanup():
+def ensure_cleanup(cpu_only=False):
+    gpu = not cpu_only and gpu_available()
+    if not gpu and free_memory_gb() < 3.5:
+        raise MemoryError("not enough free RAM for optional cleanup; use raw dictation")
     fetch(smart.MODEL, *CLEANUP)
-    gpu = gpu_available()
     destination = smart.RUNTIME / ("smart" if gpu else "smart-cpu")
     if not (destination / "llama-server.exe").is_file():
         packages = (GPU, CUDART) if gpu else (CPU,)

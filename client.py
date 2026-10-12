@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from collections import deque
 
 from engine import ENDPOINT
 
@@ -25,16 +26,20 @@ class EngineClient:
                 time.sleep(0.1)
         info = json.loads(ENDPOINT.read_text(encoding="utf-8"))
         self.token = info["token"]
-        self.sock = socket.create_connection(("127.0.0.1", info["port"]), timeout=10)
+        self.sock = socket.create_connection(("127.0.0.1", info["port"]), timeout=180)
         self.file = self.sock.makefile("rwb")
         self.next_id = 0
+        self.backlog = deque()
 
     @staticmethod
     def _reachable():
         try:
             info = json.loads(ENDPOINT.read_text(encoding="utf-8"))
-            with socket.create_connection(("127.0.0.1", info["port"]), timeout=0.2):
-                return True
+            with socket.create_connection(("127.0.0.1", info["port"]), timeout=0.5) as connection:
+                connection.sendall(json.dumps({"id": 0, "token": info["token"],
+                                               "command": "status"}).encode("utf-8") + b"\n")
+                with connection.makefile("rb") as response:
+                    return bool(json.loads(response.readline()).get("ok"))
         except (OSError, ValueError, KeyError):
             return False
 
@@ -50,8 +55,13 @@ class EngineClient:
                 if not response["ok"]:
                     raise RuntimeError(response["error"])
                 return response.get("result")
+            self.backlog.append(response)
 
     def events(self):
+        while self.backlog:
+            event = self.backlog.popleft()
+            if "event" in event:
+                yield event
         for line in self.file:
             event = json.loads(line)
             if "event" in event:

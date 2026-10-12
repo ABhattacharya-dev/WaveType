@@ -15,6 +15,13 @@ if os.name == "nt":
     kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     user32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                                   ctypes.POINTER(wintypes.DWORD)]
     user32.CallNextHookEx.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
     user32.CallNextHookEx.restype = ctypes.c_ssize_t
 
@@ -69,9 +76,15 @@ class KEYBDINPUT(ctypes.Structure):
                 ("dwExtraInfo", ctypes.c_size_t)]
 
 
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG),
+                ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+
 class INPUT(ctypes.Structure):
     class _UNION(ctypes.Union):
-        _fields_ = [("ki", KEYBDINPUT)]
+        _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT)]
     _anonymous_ = ("data",)
     _fields_ = [("type", wintypes.DWORD), ("data", _UNION)]
 
@@ -79,16 +92,18 @@ class INPUT(ctypes.Structure):
 def insert_text(text):
     if os.name != "nt":
         raise OSError("text insertion requires Windows")
-    items = (INPUT * (len(text) * 2))()
     raw = text.encode("utf-16-le")
+    items = (INPUT * len(raw))()
     for offset in range(0, len(raw), 2):
         code = int.from_bytes(raw[offset:offset + 2], "little")
         i = offset
         items[i].type = items[i + 1].type = 1
         items[i].ki = KEYBDINPUT(0, code, 0x0004, 0, 0)
         items[i + 1].ki = KEYBDINPUT(0, code, 0x0006, 0, 0)
-    if items and user32.SendInput(len(items), ctypes.byref(items), ctypes.sizeof(INPUT)) != len(items):
-        raise ctypes.WinError(ctypes.get_last_error())
+    if items:
+        sent = user32.SendInput(len(items), ctypes.byref(items), ctypes.sizeof(INPUT))
+        if sent != len(items):
+            raise OSError(f"SendInput sent {sent}/{len(items)} key events; elevated windows may block input")
 
 
 def foreground_app():
@@ -97,7 +112,19 @@ def foreground_app():
     hwnd = user32.GetForegroundWindow()
     title = ctypes.create_unicode_buffer(256)
     user32.GetWindowTextW(hwnd, title, len(title))
-    return title.value or None
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    process = kernel32.OpenProcess(0x1000, False, pid.value)
+    executable = None
+    if process:
+        try:
+            path = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(len(path))
+            if kernel32.QueryFullProcessImageNameW(process, 0, path, ctypes.byref(size)):
+                executable = os.path.basename(path.value)
+        finally:
+            kernel32.CloseHandle(process)
+    return {"process": executable, "title": title.value, "pid": pid.value}
 
 
 class Hotkey:
@@ -108,12 +135,18 @@ class Hotkey:
         self.keys = set(keys)
         self.down = set()
         self.active = False
+        self.ready = threading.Event()
+        self.error = None
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self):
         if os.name != "nt":
             raise OSError("hotkeys require Windows")
         self.thread.start()
+        if not self.ready.wait(3):
+            raise OSError("hotkey hook did not start")
+        if self.error:
+            raise self.error
 
     def _run(self):
         HOOK = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
@@ -144,7 +177,10 @@ class Hotkey:
         user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOK, wintypes.HANDLE, wintypes.DWORD]
         handle = user32.SetWindowsHookExW(13, self._callback, None, 0)
         if not handle:
-            raise ctypes.WinError(ctypes.get_last_error())
+            self.error = ctypes.WinError(ctypes.get_last_error())
+            self.ready.set()
+            return
+        self.ready.set()
         try:
             message = wintypes.MSG()
             while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
