@@ -137,13 +137,25 @@ def main(argv=None):
     parser.add_argument("--show-raw", action="store_true", help="Show the raw transcript before cleanup; do not save it.")
     args = parser.parse_args(argv)
     enabled = input("Smart cleanup? [y/N]: ").strip().lower() == "y"
-    with smart_session(enabled) as cleaner:
-        raw = transcribe()
-        if args.show_raw:
-            print(f"Raw transcript: {raw}", file=sys.stderr, flush=True)
-        text = format_transcript(raw, cleaner)
-        print(text, flush=True)
-        save_history(text)
+    from client import EngineClient
+    client = EngineClient(start=True)
+    try:
+        client.command("settings", mode="hold", smart=enabled)
+        client.command("subscribe")
+        input("Press Enter to record...")
+        client.command("start")
+        input("Recording. Press Enter to stop...")
+        client.command("release")
+        for event in client.events():
+            if event["event"] == "result":
+                if args.show_raw:
+                    print(f"Raw transcript: {event['raw']}", file=sys.stderr, flush=True)
+                print(event["text"], flush=True)
+                break
+            if event["event"] == "error":
+                print(event["message"], file=sys.stderr)
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":

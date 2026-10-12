@@ -2,6 +2,10 @@
 __pycache__/
 *.gguf
 personal_terms.json
+personal_vocabulary.json
 history/
 runtime/smart/
+runtime/smart-cpu/
+runtime/*.zip
+runtime/*.part
 benchmark-results*.json

@@ -114,8 +114,10 @@ def validate_output(text, values, json_mode=False):
 
 
 class SmartCleanup:
-    def __init__(self, model=MODEL):
+    def __init__(self, model=MODEL, gpu_layers=99, executable=None):
         self.model = Path(model)
+        self.gpu_layers = gpu_layers
+        self.executable = Path(executable) if executable else RUNTIME / "smart" / "llama-server.exe"
         self.process = None
         self.key = secrets.token_hex(16)
         self.http = build_opener(ProxyHandler({}))
@@ -129,16 +131,19 @@ class SmartCleanup:
             return json.load(response)
 
     def start(self):
-        executable = RUNTIME / "smart" / "llama-server.exe"
+        executable = self.executable
         if not executable.is_file() or not self.model.is_file():
             raise OSError("optional model/runtime missing; see README")
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
         self.url = f"http://127.0.0.1:{port}"
+        layers = self.gpu_layers
+        if layers == "auto":
+            layers = 99 if (RUNTIME / "smart" / "cudart64_12.dll").is_file() else 0
         self.process = subprocess.Popen([
             str(executable), "-m", str(self.model), "--host", "127.0.0.1",
-            "--port", str(port), "--api-key", self.key, "-ngl", "99",
+            "--port", str(port), "--api-key", self.key, "-ngl", str(layers),
             "-c", "4096", "-np", "1", "-t", "8", "--jinja",
             "--chat-template-kwargs", '{"enable_thinking":false}',
             "--no-webui",
@@ -189,7 +194,7 @@ class SmartCleanup:
                          {"role": "user", "content": "Dictation to convert:\n" + content if json_mode else "Rewrite this dictation:\n" + content}],
             "temperature": 0, "max_tokens": 512, "stream": False,
             "chat_template_kwargs": {"enable_thinking": False},
-            "cache_prompt": False,
+            "cache_prompt": True,
         }
         if json_mode:
             data["response_format"] = {"type": "json_object"}

@@ -1,0 +1,85 @@
+"""Minimal JSON-lines client for the local engine."""
+
+import json
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from engine import ENDPOINT
+
+
+class EngineClient:
+    def __init__(self, start=False, no_mic=False):
+        if start and not self._reachable():
+            flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            process = subprocess.Popen([sys.executable, str(Path(__file__).with_name("engine.py")), "serve",
+                              *(["--no-mic"] if no_mic else [])], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=flags, close_fds=True)
+            deadline = time.monotonic() + 3600
+            while time.monotonic() < deadline and not self._reachable():
+                if process.poll() is not None:
+                    raise RuntimeError("engine startup failed; see engine.log")
+                time.sleep(0.1)
+        info = json.loads(ENDPOINT.read_text(encoding="utf-8"))
+        self.token = info["token"]
+        self.sock = socket.create_connection(("127.0.0.1", info["port"]), timeout=10)
+        self.file = self.sock.makefile("rwb")
+        self.next_id = 0
+
+    @staticmethod
+    def _reachable():
+        try:
+            info = json.loads(ENDPOINT.read_text(encoding="utf-8"))
+            with socket.create_connection(("127.0.0.1", info["port"]), timeout=0.2):
+                return True
+        except (OSError, ValueError, KeyError):
+            return False
+
+    def command(self, name, **args):
+        self.next_id += 1
+        request_id = self.next_id
+        self.file.write(json.dumps({"id": request_id, "token": self.token,
+                                    "command": name, "args": args}).encode("utf-8") + b"\n")
+        self.file.flush()
+        while True:
+            response = json.loads(self.file.readline())
+            if response.get("id") == request_id:
+                if not response["ok"]:
+                    raise RuntimeError(response["error"])
+                return response.get("result")
+
+    def events(self):
+        for line in self.file:
+            event = json.loads(line)
+            if "event" in event:
+                yield event
+
+    def close(self):
+        self.file.close()
+        self.sock.close()
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("wav", type=Path)
+    parser.add_argument("--mode", choices=("hold", "tap"), default="hold")
+    parser.add_argument("--smart", action="store_true")
+    options = parser.parse_args()
+    client = EngineClient(start=True, no_mic=True)
+    client.command("settings", mode=options.mode, smart=options.smart)
+    client.command("subscribe")
+    client.command("replay", path=str(options.wav))
+    client.command("press" if options.mode == "tap" else "release")
+    for event in client.events():
+        if event["event"] == "result":
+            print(event["text"])
+            print(json.dumps(event["timings"]))
+            break
+        if event["event"] == "error":
+            print(event["message"], file=sys.stderr)
+            break
+    client.close()

@@ -85,29 +85,29 @@ class SmartTests(unittest.TestCase):
                 self.assertEqual(stt.format_transcript("My name, that's my name.", cleaner), "My name, that's my name.")
 
     def test_main_saves_only_final(self):
+        client = Mock()
+        client.events.return_value = iter([{"event": "result", "raw": "Hello.", "text": "Hello."}])
         with (
-            patch("builtins.input", return_value="n"),
-            patch.object(stt, "smart_session", return_value=nullcontext(None)) as session,
-            patch.object(stt, "transcribe", return_value="Hello."),
-            patch.object(stt, "save_history") as save,
+            patch("builtins.input", side_effect=["n", "", ""]),
+            patch("client.EngineClient", return_value=client),
             patch("builtins.print"),
         ):
             stt.main([])
-            session.assert_called_once_with(False)
-            save.assert_called_once_with("Hello.")
+            client.command.assert_any_call("settings", mode="hold", smart=False)
+            client.command.assert_any_call("start")
+            client.command.assert_any_call("release")
 
     def test_show_raw_keeps_only_final_history(self):
+        client = Mock()
+        client.events.return_value = iter([{"event": "result", "raw": "Today, no tomorrow.", "text": "Tomorrow."}])
         with (
-            patch("builtins.input", return_value="y"),
-            patch.object(stt, "smart_session", return_value=nullcontext(Mock())),
-            patch.object(stt, "transcribe", return_value="Today, no tomorrow."),
-            patch.object(stt, "format_transcript", return_value="Tomorrow."),
-            patch.object(stt, "save_history") as save,
+            patch("builtins.input", side_effect=["y", "", ""]),
+            patch("client.EngineClient", return_value=client),
             patch("builtins.print") as output,
         ):
             stt.main(["--show-raw"])
             output.assert_any_call("Raw transcript: Today, no tomorrow.", file=stt.sys.stderr, flush=True)
-            save.assert_called_once_with("Tomorrow.")
+            client.command.assert_any_call("settings", mode="hold", smart=True)
 
 
 if __name__ == "__main__":
