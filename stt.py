@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 import wave
+from datetime import datetime
 from pathlib import Path
 
 import sounddevice as sd
@@ -11,7 +12,22 @@ import sounddevice as sd
 
 RUNTIME = Path(__file__).resolve().parent / "runtime"
 TERMS_FILE = RUNTIME.parent / "personal_terms.json"
+HISTORY_DIR = RUNTIME.parent / "history"
 SHORTCUT_START = re.compile(r"\binsert\s+my\s+", re.IGNORECASE)
+
+
+def save_history(text):
+    if not text.strip():
+        return
+
+    now = datetime.now().astimezone()
+    entry = {"time": now.timetz().isoformat(timespec="seconds"), "text": text}
+    try:
+        HISTORY_DIR.mkdir(exist_ok=True)
+        with (HISTORY_DIR / f"{now.date().isoformat()}.jsonl").open("a", encoding="utf-8") as history:
+            history.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        print(f"Could not save history: {exc}", file=sys.stderr)
 
 
 def replace_shortcuts(text):
@@ -88,7 +104,9 @@ def main():
     )
     if result.returncode:
         raise SystemExit(result.stderr.decode(errors="replace").strip())
-    print(replace_shortcuts(result.stdout.decode(errors="replace").strip()))
+    text = replace_shortcuts(result.stdout.decode(errors="replace").strip())
+    print(text, flush=True)
+    save_history(text)
 
 
 if __name__ == "__main__":

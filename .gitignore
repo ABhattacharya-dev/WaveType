@@ -2,3 +2,4 @@
 __pycache__/
 *.gguf
 personal_terms.json
+history/

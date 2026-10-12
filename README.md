@@ -5,7 +5,7 @@ Offline terminal speech-to-text using Parakeet Redux.
 ## Setup
 
 ```powershell
-git clone -b core-structure https://github.com/ABhattacharya-dev/stt-core-structure.git
+git clone -b feature https://github.com/ABhattacharya-dev/stt-core-structure.git
 cd stt-core-structure
 
 py -3.12 -m venv .venv
@@ -46,3 +46,13 @@ python stt.py
 ```
 
 Press Enter to start recording. Press Enter again to stop and print the transcript.
+
+## History
+
+Final transcripts, including expanded shortcuts, are saved locally in `history/YYYY-MM-DD.jsonl` beside `stt.py`. Each date has its own file, containing one JSON record per transcription:
+
+```json
+{"time": "14:30:05+05:30", "text": "Your transcribed text."}
+```
+
+Dates and times use your computer's local timezone; the time includes its UTC offset. Blank transcripts are skipped. New entries are appended without reading older history, after the transcript is printed. If saving fails, a short error is shown and the transcript remains available in the terminal. History includes any inserted personal details and is ignored by Git.
