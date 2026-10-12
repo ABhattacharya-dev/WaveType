@@ -11,11 +11,11 @@ import sounddevice as sd
 
 RUNTIME = Path(__file__).resolve().parent / "runtime"
 TERMS_FILE = RUNTIME.parent / "personal_terms.json"
-SHORTCUT = re.compile(r"\binsert\s+my\s+(second\s+email|name|email|address)\b", re.IGNORECASE)
+SHORTCUT_START = re.compile(r"\binsert\s+my\s+", re.IGNORECASE)
 
 
 def replace_shortcuts(text):
-    if not SHORTCUT.search(text):
+    if not SHORTCUT_START.search(text):
         return text
 
     try:
@@ -28,17 +28,31 @@ def replace_shortcuts(text):
     if not isinstance(terms, dict):
         raise SystemExit(f"{TERMS_FILE.name} must contain a JSON object.")
 
+    shortcuts = {}
+    for key, value in terms.items():
+        normalized = " ".join(key.lower().split())
+        if not normalized or normalized in shortcuts:
+            raise SystemExit(f"{TERMS_FILE.name} contains a blank or duplicate key: {key!r}")
+        shortcuts[normalized] = value
+
+    if not shortcuts:
+        return text
+
+    names = sorted(shortcuts, key=len, reverse=True)
+    choices = "|".join(re.escape(name).replace(r"\ ", r"\s+") for name in names)
+    # shortcut: A known key may match the start of an unknown longer phrase; require a spoken delimiter if that becomes a problem.
+    shortcut = re.compile(r"\binsert\s+my\s+(" + choices + r")(?!\w)", re.IGNORECASE)
     missing = set()
 
     def replace(match):
         key = " ".join(match.group(1).lower().split())
-        value = terms.get(key)
+        value = shortcuts[key]
         if not isinstance(value, str) or not value.strip():
             missing.add(key)
             return match.group()
         return value
 
-    result = SHORTCUT.sub(replace, text)
+    result = shortcut.sub(replace, text)
     for key in sorted(missing):
         print(f"No saved value for {key} in {TERMS_FILE.name}.", file=sys.stderr)
     return result
