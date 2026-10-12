@@ -3,3 +3,5 @@ __pycache__/
 *.gguf
 personal_terms.json
 history/
+runtime/smart/
+benchmark-results*.json

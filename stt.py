@@ -1,3 +1,4 @@
+import argparse
 import io
 import json
 import re
@@ -8,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 
 import sounddevice as sd
+
+from smart import restore, smart_session
 
 
 RUNTIME = Path(__file__).resolve().parent / "runtime"
@@ -30,7 +33,7 @@ def save_history(text):
         print(f"Could not save history: {exc}", file=sys.stderr)
 
 
-def replace_shortcuts(text):
+def replace_shortcuts(text, protect=None):
     if not SHORTCUT_START.search(text):
         return text
 
@@ -65,8 +68,8 @@ def replace_shortcuts(text):
         value = shortcuts[key]
         if not isinstance(value, str) or not value.strip():
             missing.add(key)
-            return match.group()
-        return value
+            return protect(match.group()) if protect else match.group()
+        return protect(value) if protect else value
 
     result = shortcut.sub(replace, text)
     for key in sorted(missing):
@@ -74,7 +77,29 @@ def replace_shortcuts(text):
     return result
 
 
-def main():
+def format_transcript(text, cleaner=None):
+    if cleaner is None or not text.strip():
+        return replace_shortcuts(text)
+    values = {}
+
+    def protect(value):
+        index = len(values)
+        marker = f"ZXQ{index}QXZ"
+        while marker in text or marker in values:
+            index += 1
+            marker = f"ZXQ{index}QXZ"
+        values[marker] = value
+        return marker
+
+    protected = replace_shortcuts(text, protect)
+    try:
+        return cleaner.clean(protected, values)
+    except (OSError, ValueError, KeyError, IndexError, TypeError, RecursionError):
+        print("Smart cleanup failed; using original transcript.", file=sys.stderr)
+        return restore(protected, values)
+
+
+def transcribe():
     chunks = []
     sample_rate = int(sd.query_devices(kind="input")["default_samplerate"])
 
@@ -104,9 +129,21 @@ def main():
     )
     if result.returncode:
         raise SystemExit(result.stderr.decode(errors="replace").strip())
-    text = replace_shortcuts(result.stdout.decode(errors="replace").strip())
-    print(text, flush=True)
-    save_history(text)
+    return result.stdout.decode(errors="replace").strip()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--show-raw", action="store_true", help="Show the raw transcript before cleanup; do not save it.")
+    args = parser.parse_args(argv)
+    enabled = input("Smart cleanup? [y/N]: ").strip().lower() == "y"
+    with smart_session(enabled) as cleaner:
+        raw = transcribe()
+        if args.show_raw:
+            print(f"Raw transcript: {raw}", file=sys.stderr, flush=True)
+        text = format_transcript(raw, cleaner)
+        print(text, flush=True)
+        save_history(text)
 
 
 if __name__ == "__main__":
