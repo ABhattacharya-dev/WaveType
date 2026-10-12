@@ -23,6 +23,20 @@ Invoke-WebRequest `
 
 The model is about 942 MB and is used locally after download.
 
+## Personal shortcuts
+
+Create `personal_terms.json` beside `stt.py` and edit its values:
+
+```json
+{
+  "name": "Your Full Name",
+  "email": "you@example.com",
+  "address": "Your Street Address"
+}
+```
+
+Say “insert my name,” “insert my email,” or “insert my address” during recording. Only those commands are replaced; ordinary phrases such as “my name, that's my name” remain unchanged. The file is ignored by Git so your personal details stay local. If a value is blank or missing, the command stays in the transcript and a short error is printed.
+
 ## Run
 
 ```powershell

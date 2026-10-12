@@ -1,4 +1,6 @@
 import io
+import json
+import re
 import subprocess
 import sys
 import wave
@@ -8,6 +10,38 @@ import sounddevice as sd
 
 
 RUNTIME = Path(__file__).resolve().parent / "runtime"
+TERMS_FILE = RUNTIME.parent / "personal_terms.json"
+SHORTCUT = re.compile(r"\binsert\s+my\s+(name|email|address)\b", re.IGNORECASE)
+
+
+def replace_shortcuts(text):
+    if not SHORTCUT.search(text):
+        return text
+
+    try:
+        terms = json.loads(TERMS_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        terms = {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Cannot read {TERMS_FILE.name}: {exc}") from exc
+
+    if not isinstance(terms, dict):
+        raise SystemExit(f"{TERMS_FILE.name} must contain a JSON object.")
+
+    missing = set()
+
+    def replace(match):
+        key = match.group(1).lower()
+        value = terms.get(key)
+        if not isinstance(value, str) or not value.strip():
+            missing.add(key)
+            return match.group()
+        return value
+
+    result = SHORTCUT.sub(replace, text)
+    for key in sorted(missing):
+        print(f"No saved value for {key} in {TERMS_FILE.name}.", file=sys.stderr)
+    return result
 
 
 def main():
@@ -40,7 +74,7 @@ def main():
     )
     if result.returncode:
         raise SystemExit(result.stderr.decode(errors="replace").strip())
-    print(result.stdout.decode(errors="replace").strip())
+    print(replace_shortcuts(result.stdout.decode(errors="replace").strip()))
 
 
 if __name__ == "__main__":
