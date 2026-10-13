@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from collections import deque
 
-from engine import ENDPOINT
+from ipc_protocol import ENDPOINT
 
 
 class EngineClient:

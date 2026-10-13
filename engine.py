@@ -26,10 +26,9 @@ import smart
 import stt
 from vocabulary import apply_vocabulary
 from windows_support import ChildJob, Hotkey, foreground_app, foreground_window, insert_text
+from ipc_protocol import APP_DIR, ENDPOINT
 
 
-APP_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "STTCore"
-ENDPOINT = APP_DIR / "endpoint.json"
 LOG = APP_DIR / "engine.log"
 SAMPLE_RATE = 16000
 IDLE_UNLOAD = 300
