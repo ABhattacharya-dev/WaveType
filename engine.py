@@ -181,7 +181,7 @@ class DictationEngine:
         self.rate = SAMPLE_RATE
         self.capture_rate = SAMPLE_RATE
         self.microphone = None
-        self.language = "en"
+        self.language = "auto"
         self.start_time = 0.0
         self.foreground = None
         self.target_window = None
@@ -352,7 +352,7 @@ class DictationEngine:
                 from model_manager import gpu_available, free_memory_gb
                 return {"asr_installed": (stt.RUNTIME / "redux-q8_0.gguf").is_file(),
                         "cleanup_installed": smart.MODEL.is_file(), "gpu_available": gpu_available(),
-                        "free_memory_gb": round(free_memory_gb(), 1), "language": "English",
+                        "free_memory_gb": round(free_memory_gb(), 1), "language": "Automatic (25 languages)",
                         "tier": self.tier}
             if name == "dictionary_get":
                 return dictionary_get(stt.TERMS_FILE, VOCABULARY)
@@ -406,9 +406,9 @@ class DictationEngine:
                         self.cleaner = None
                     self.tier = args["tier"]
                 if "language" in args:
-                    if args["language"] != "en":
-                        raise ValueError("Parakeet Redux currently supports English only")
-                    self.language = "en"
+                    if args["language"] != "auto":
+                        raise ValueError("this Parakeet adapter detects its supported languages automatically")
+                    self.language = "auto"
                 if "microphone" in args:
                     microphone = args["microphone"]
                     if microphone is not None and (not isinstance(microphone, int) or

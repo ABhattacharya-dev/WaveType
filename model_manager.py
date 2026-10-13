@@ -5,6 +5,7 @@ import ctypes
 import os
 import shutil
 import subprocess
+import sys
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -80,6 +81,12 @@ def free_memory_gb():
 
 
 def ensure_asr():
+    bundled_cli = Path(getattr(sys, "_MEIPASS", "")) / "runtime" / "parakeet-cli.exe"
+    if getattr(sys, "frozen", False) and not (stt.RUNTIME / "parakeet-cli.exe").is_file():
+        if not bundled_cli.is_file():
+            raise FileNotFoundError("bundled Parakeet CLI is missing")
+        stt.RUNTIME.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(bundled_cli, stt.RUNTIME / "parakeet-cli.exe")
     fetch(stt.RUNTIME / "redux-q8_0.gguf", *ASR)
     if not (stt.RUNTIME / "parakeet-cli.exe").is_file():
         raise FileNotFoundError("parakeet-cli.exe is missing from runtime")

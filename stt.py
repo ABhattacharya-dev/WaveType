@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -7,7 +8,9 @@ from pathlib import Path
 from smart import restore
 
 
-RUNTIME = Path(__file__).resolve().parent / "runtime"
+RUNTIME = Path(os.environ.get("STT_RUNTIME_DIR") or
+               ((Path(os.environ.get("LOCALAPPDATA", Path.home())) / "STTCore" / "runtime")
+                if getattr(sys, "frozen", False) else Path(__file__).resolve().parent / "runtime"))
 TERMS_FILE = RUNTIME.parent / "personal_terms.json"
 HISTORY_DIR = RUNTIME.parent / "history"
 SHORTCUT_START = re.compile(r"\binsert\s+my\s+", re.IGNORECASE)

@@ -15,8 +15,13 @@ class EngineClient:
     def __init__(self, start=False, no_mic=False):
         if start and not self._reachable():
             flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            process = subprocess.Popen([sys.executable, str(Path(__file__).with_name("engine.py")), "serve",
-                              *(["--no-mic"] if no_mic else [])], stdin=subprocess.DEVNULL,
+            executable = (Path(sys.executable).parent / "engine" / "STTEngine.exe"
+                          if getattr(sys, "frozen", False) else None)
+            command = ([str(executable), "serve"] if executable else
+                       [sys.executable, str(Path(__file__).with_name("engine.py")), "serve"])
+            if executable and not executable.is_file():
+                raise FileNotFoundError(f"bundled engine is missing: {executable}")
+            process = subprocess.Popen([*command, *(["--no-mic"] if no_mic else [])], stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              creationflags=flags, close_fds=True)
             deadline = time.monotonic() + 3600

@@ -1,11 +1,15 @@
 """User supplied recognition aliases, separate from spoken insert-my snippets."""
 
 import json
+import os
 import re
+import sys
 from pathlib import Path
 
 
-VOCABULARY = Path(__file__).with_name("personal_vocabulary.json")
+VOCABULARY = (Path(os.environ.get("LOCALAPPDATA", Path.home())) / "STTCore" /
+              "personal_vocabulary.json" if getattr(sys, "frozen", False) else
+              Path(__file__).with_name("personal_vocabulary.json"))
 
 
 def apply_vocabulary(text, path=VOCABULARY):

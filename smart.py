@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import secrets
 import socket
@@ -11,7 +12,9 @@ from pathlib import Path
 from urllib.request import Request, build_opener, ProxyHandler
 
 
-RUNTIME = Path(__file__).resolve().parent / "runtime"
+RUNTIME = Path(os.environ.get("STT_RUNTIME_DIR") or
+               ((Path(os.environ.get("LOCALAPPDATA", Path.home())) / "STTCore" / "runtime")
+                if getattr(sys, "frozen", False) else Path(__file__).resolve().parent / "runtime"))
 MODEL = RUNTIME / "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
 JSON_START = re.compile(r"^\s*write\s+in\s+json\s+format\b[\s,:.]*", re.IGNORECASE)
 MARKER = re.compile(r"ZXQ[A-Za-z0-9_]*QXZ")
