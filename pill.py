@@ -44,7 +44,8 @@ def pill_position(area, screen, width, height, margin):
 
 
 class Pill:
-    def __init__(self, smart=False, tap_threshold_ms=250):
+    def __init__(self, smart=False, tap_threshold_ms=250, on_event=None, on_window_message=None,
+                 settings=None):
         if os.name != "nt":
             raise OSError("pill requires Windows")
         try:
@@ -60,6 +61,8 @@ class Pill:
         self.error_serial = 0
         self.target = None
         self.ready = False
+        self.on_event = on_event
+        self.on_window_message = on_window_message
         previous_focus = user32.GetForegroundWindow()
         self.root = tk.Tk()
         self.root.withdraw()
@@ -81,7 +84,7 @@ class Pill:
         if previous_focus and user32.GetForegroundWindow() == self.hwnd:
             user32.SetForegroundWindow(previous_focus)
         self.root.after(33, self._tick)
-        threading.Thread(target=self._connect, args=(smart, tap_threshold_ms), daemon=True).start()
+        threading.Thread(target=self._connect, args=(smart, tap_threshold_ms, settings or {}), daemon=True).start()
 
     def _install_window_style(self):
         get_style = user32.GetWindowLongPtrW
@@ -101,6 +104,8 @@ class Pill:
         def window_proc(hwnd, message, wparam, lparam):
             if message == 0x21:  # WM_MOUSEACTIVATE
                 return 3  # MA_NOACTIVATE: keep the click
+            if self.on_window_message and self.on_window_message(message, wparam, lparam):
+                return 0
             return user32.CallWindowProcW(self.previous_procs[hwnd], hwnd, message, wparam, lparam)
 
         self.window_proc = PROC(window_proc)
@@ -167,14 +172,21 @@ class Pill:
 
     def _send(self, name, **args):
         if self.ready and self.state != "processing":
-            self.commands.put((name, args))
+            self.commands.put((name, args, None))
 
-    def _connect(self, smart, threshold):
+    def request(self, name, callback=None, **args):
+        if self.ready:
+            self.commands.put((name, args, callback))
+        elif callback:
+            self.messages.put({"event": "response", "callback": callback,
+                               "error": "Engine is still starting"})
+
+    def _connect(self, smart, threshold, settings):
         commands = events = None
         try:
             commands = EngineClient(start=True)
             commands.command("settings", mode="hybrid", smart=smart,
-                             tap_threshold_ms=threshold, hotkey=True)
+                             tap_threshold_ms=threshold, hotkey=True, **settings)
             events = EngineClient()
             events.command("subscribe")
             self.messages.put({"event": "state", "value": commands.command("status")["state"]})
@@ -197,7 +209,7 @@ class Pill:
     def _command_loop(self, client):
         try:
             while True:
-                name, args = self.commands.get()
+                name, args, callback = self.commands.get()
                 if name is None:
                     try:
                         state = client.command("status")["state"]
@@ -208,9 +220,16 @@ class Pill:
                         pass
                     break
                 try:
-                    client.command(name, **args)
+                    result = client.command(name, **args)
+                    if callback:
+                        self.messages.put({"event": "response", "callback": callback,
+                                           "result": result})
                 except Exception as exc:
-                    self.messages.put({"event": "error", "message": str(exc)})
+                    if callback:
+                        self.messages.put({"event": "response", "callback": callback,
+                                           "error": str(exc)})
+                    else:
+                        self.messages.put({"event": "error", "message": str(exc)})
         finally:
             client.close()
 
@@ -238,6 +257,10 @@ class Pill:
                 if self.ready:
                     self.root.after(3500, self._clear_error, self.error_serial)
                 redraw = True
+            elif event["event"] == "response":
+                event["callback"](event.get("result"), event.get("error"))
+            if self.on_event and event["event"] != "response":
+                self.on_event(event)
         if redraw or not hasattr(self, "positioned"):
             self._place()
             self._draw()
@@ -258,7 +281,7 @@ class Pill:
             self.root.mainloop()
         finally:
             if getattr(self, "command_worker", None):
-                self.commands.put((None, {}))
+                self.commands.put((None, {}, None))
                 self.command_worker.join(timeout=4)
 
 
