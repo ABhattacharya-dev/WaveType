@@ -16,7 +16,6 @@ import wave
 from collections import deque
 from array import array
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from pathlib import Path
 
 import sounddevice as sd
@@ -27,6 +26,9 @@ import stt
 from vocabulary import apply_vocabulary
 from windows_support import ChildJob, Hotkey, foreground_app, foreground_window, insert_text
 from ipc_protocol import APP_DIR, ENDPOINT
+from user_data import (dictionary_get, dictionary_set, history_append, history_audio,
+                       history_change, history_list)
+from vocabulary import VOCABULARY
 
 
 LOG = APP_DIR / "engine.log"
@@ -141,16 +143,6 @@ def meaning_guard(raw, cleaned):
     return not introduced
 
 
-def append_history(record):
-    if not record["text"].strip():
-        return
-    now = datetime.now().astimezone()
-    record = {"time": now.timetz().isoformat(timespec="seconds"), **record}
-    stt.HISTORY_DIR.mkdir(exist_ok=True)
-    with (stt.HISTORY_DIR / f"{now.date().isoformat()}.jsonl").open("a", encoding="utf-8") as output:
-        output.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-
 class DictationEngine:
     def __init__(self, asr=None, capture=True, hotkey=False):
         if asr is None:
@@ -175,6 +167,7 @@ class DictationEngine:
         self.cleaner_used = 0
         self.pending = []
         self.segment = []
+        self.audio_chunks = []
         self.level = 0.0
         self.noise = 100.0
         self.quiet_frames = 0
@@ -187,6 +180,8 @@ class DictationEngine:
         self.stream = None
         self.rate = SAMPLE_RATE
         self.capture_rate = SAMPLE_RATE
+        self.microphone = None
+        self.language = "en"
         self.start_time = 0.0
         self.foreground = None
         self.target_window = None
@@ -208,10 +203,10 @@ class DictationEngine:
         threading.Thread(target=self._level_loop, daemon=True).start()
 
     def _start_capture(self):
-        device = sd.query_devices(kind="input")
+        device = sd.query_devices(self.microphone, kind="input")
         try:
             self.stream = sd.RawInputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16",
-                                            blocksize=320, callback=self._audio)
+                                            blocksize=320, callback=self._audio, device=self.microphone)
             self.rate = SAMPLE_RATE
             self.capture_rate = SAMPLE_RATE
             self.stream.start()
@@ -219,7 +214,8 @@ class DictationEngine:
             self.rate = int(device["default_samplerate"])
             self.capture_rate = self.rate
             self.stream = sd.RawInputStream(samplerate=self.rate, channels=1, dtype="int16",
-                                            blocksize=max(1, self.rate // 50), callback=self._audio)
+                                            blocksize=max(1, self.rate // 50), callback=self._audio,
+                                            device=self.microphone)
             self.stream.start()
 
     def _audio(self, indata, frames, timing, status):
@@ -232,6 +228,7 @@ class DictationEngine:
             self.level = min(1.0, level / 10000)
             if self.state in ("recording", "locked") and not self.replaying:
                 self.segment.append(chunk)
+                self.audio_chunks.append(chunk)
                 threshold = max(250, self.noise * 3)
                 voice = self.vad.is_speech(chunk, self.rate) and level >= threshold if self.rate == 16000 else level >= threshold
                 self.speech_run = self.speech_run + 1 if voice else 0
@@ -345,7 +342,44 @@ class DictationEngine:
                 return {"state": self.state, "mode": self.mode, "level": self.level,
                         "tap_threshold_ms": self.tap_threshold_ms, "hotkey": self.hotkey_enabled,
                         "smart_ready": self.cleaner is not None, "sample_rate": self.rate,
-                        "asr_backend": type(self.asr).__name__, "capture_ready": self.stream is not None}
+                        "asr_backend": type(self.asr).__name__, "capture_ready": self.stream is not None,
+                        "smart": self.smart_enabled, "tier": self.tier, "microphone": self.microphone,
+                        "language": self.language}
+            if name == "devices":
+                return [{"index": index, "name": device["name"]} for index, device in
+                        enumerate(sd.query_devices()) if device["max_input_channels"] > 0]
+            if name == "model_status":
+                from model_manager import gpu_available, free_memory_gb
+                return {"asr_installed": (stt.RUNTIME / "redux-q8_0.gguf").is_file(),
+                        "cleanup_installed": smart.MODEL.is_file(), "gpu_available": gpu_available(),
+                        "free_memory_gb": round(free_memory_gb(), 1), "language": "English",
+                        "tier": self.tier}
+            if name == "dictionary_get":
+                return dictionary_get(stt.TERMS_FILE, VOCABULARY)
+            if name == "dictionary_set":
+                return dictionary_set(stt.TERMS_FILE, VOCABULARY, args.get("kind"), args.get("entries"))
+            if name == "history_list":
+                return history_list(stt.HISTORY_DIR, args.get("limit", 100), args.get("offset", 0))
+            if name == "history_change":
+                action = args.get("action")
+                if action == "retry":
+                    if self.state != "idle":
+                        raise ValueError("retry requires idle state")
+                    entry = next((row for row in history_list(stt.HISTORY_DIR, 500)
+                                  if row["id"] == args.get("id")), None)
+                    if entry is None:
+                        raise ValueError("history entry not found")
+                    raw = entry["raw"]
+                    text = stt.format_transcript(raw)
+                    if args.get("smart", self.smart_enabled) and cleanup_needed(raw):
+                        self._ensure_cleaner()
+                        candidate = stt.format_transcript(raw, self.cleaner)
+                        if meaning_guard(text, candidate):
+                            text = candidate
+                    return history_change(stt.HISTORY_DIR, entry["id"], "retry", text)
+                return history_change(stt.HISTORY_DIR, args.get("id"), action)
+            if name == "history_audio":
+                return history_audio(stt.HISTORY_DIR, args.get("id"))
             if name == "settings":
                 if self.state != "idle":
                     if args != {"hotkey": False}:
@@ -371,6 +405,22 @@ class DictationEngine:
                         self.cleaner.close()
                         self.cleaner = None
                     self.tier = args["tier"]
+                if "language" in args:
+                    if args["language"] != "en":
+                        raise ValueError("Parakeet Redux currently supports English only")
+                    self.language = "en"
+                if "microphone" in args:
+                    microphone = args["microphone"]
+                    if microphone is not None and (not isinstance(microphone, int) or
+                            microphone not in [item["index"] for item in self.command("devices", {})]):
+                        raise ValueError("unknown microphone")
+                    if microphone != self.microphone:
+                        if self.stream:
+                            self.stream.stop()
+                            self.stream.close()
+                            self.stream = None
+                        self.microphone = microphone
+                        self._start_capture()
                 if "hotkey" in args:
                     self.hotkey_enabled = bool(args["hotkey"])
                     if self.hotkey_enabled:
@@ -383,7 +433,8 @@ class DictationEngine:
                         raise
                 return {"mode": self.mode, "tap_threshold_ms": self.tap_threshold_ms,
                         "smart": self.smart_enabled, "tier": self.tier,
-                        "hotkey": self.hotkey_enabled}
+                        "hotkey": self.hotkey_enabled, "microphone": self.microphone,
+                        "language": self.language}
             click = name == "toggle"
             if name in ("start", "press", "toggle"):
                 if self.state == "locked" and (self.mode in ("tap", "hybrid") or click):
@@ -397,6 +448,7 @@ class DictationEngine:
                 self.rate = self.capture_rate
                 self.replaying = False
                 self.segment = list(self.pre_roll)
+                self.audio_chunks = list(self.pre_roll)
                 self.pending = []
                 self.speech_run = self.max_speech_run = self.quiet_frames = 0
                 self.start_time = time.perf_counter()
@@ -421,6 +473,7 @@ class DictationEngine:
                 if self.state not in ("recording", "locked"):
                     raise ValueError("nothing to cancel")
                 self.segment.clear()
+                self.audio_chunks.clear()
                 self.replaying = False
                 self._state("idle")
                 return {"state": self.state}
@@ -435,6 +488,7 @@ class DictationEngine:
                 self.rate = rate
                 self.replaying = True
                 self.segment = [payload]
+                self.audio_chunks = [payload]
                 self.pending = []
                 self.start_time = time.perf_counter()
                 self.foreground = foreground_app()
@@ -457,12 +511,14 @@ class DictationEngine:
         if not futures:
             raise ValueError("no audio recorded")
         release_at = time.perf_counter()
+        audio_chunks = self.audio_chunks
+        self.audio_chunks = []
         self.recording_ms = round((release_at - self.start_time) * 1000, 1)
         self._state("processing")
-        threading.Thread(target=self._process, args=(futures, release_at), daemon=True).start()
+        threading.Thread(target=self._process, args=(futures, release_at, audio_chunks), daemon=True).start()
         return {"state": "processing"}
 
-    def _process(self, futures, release_at):
+    def _process(self, futures, release_at, audio_chunks):
         timings = {}
         error = lambda message: self.emit("error", {"message": message})
         try:
@@ -502,13 +558,17 @@ class DictationEngine:
                     self.emit("error", {"message": f"Text insertion failed: {exc}"})
                 timings["insert_ms"] = round((time.perf_counter() - start) * 1000, 1)
             timings["release_to_ready_ms"] = round((time.perf_counter() - release_at) * 1000, 1)
+            self.emit("result", {"raw": raw, "text": final, "timings": timings})
             if self.record_history:
                 try:
-                    append_history({"text": final, "raw": raw, "cleaned": final,
-                                    "timings": timings, "app": self.foreground, "mode": self.mode})
+                    record = history_append(stt.HISTORY_DIR,
+                                            {"text": final, "raw": raw, "plain": plain, "cleaned": final,
+                                             "timings": timings, "app": self.foreground, "mode": self.mode},
+                                            wav_bytes(b"".join(audio_chunks), self.rate) if audio_chunks else None)
+                    if record:
+                        self.emit("history_added", {"id": record["id"]})
                 except OSError as exc:
                     self.emit("error", {"message": f"History could not be saved: {exc}"})
-            self.emit("result", {"raw": raw, "text": final, "timings": timings})
         except Exception as exc:
             logging.exception("dictation failed")
             self.emit("error", {"message": str(exc)})
