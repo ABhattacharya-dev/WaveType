@@ -15,6 +15,7 @@ import model_manager
 from evaluate import percentile, word_errors
 from vocabulary import apply_vocabulary
 from windows_support import INPUT
+from pill import pill_position
 
 
 class EngineTests(unittest.TestCase):
@@ -54,6 +55,62 @@ class EngineTests(unittest.TestCase):
                 time.sleep(0.01)
         self.assertEqual([x for x in events if x["event"] == "result"][0]["text"], "Hello there.")
         self.assertEqual(self.core.state, "idle")
+
+    def test_hybrid_tap_hold_and_click(self):
+        self.core.command("settings", {"mode": "hybrid", "tap_threshold_ms": 250})
+        self.assertEqual(self.core.command("press", {})["state"], "recording")
+        self.assertEqual(self.core.command("release", {"held_ms": 249})["state"], "locked")
+        with patch.object(self.core, "_finish", return_value={"state": "processing"}) as finish:
+            self.core.command("press", {})
+            finish.assert_called_once()
+        self.core.command("cancel", {})
+        self.core.command("press", {})
+        with patch.object(self.core, "_finish", return_value={"state": "processing"}) as finish:
+            self.core.command("release", {"held_ms": 250})
+            finish.assert_called_once()
+        self.core.command("cancel", {})
+        self.assertEqual(self.core.command("toggle", {})["state"], "locked")
+        self.core.hotkey_enabled = True
+        self.assertFalse(self.core.command("settings", {"hotkey": False})["hotkey"])
+        with patch.object(self.core, "_finish", return_value={"state": "processing"}) as finish:
+            self.core.command("toggle", {})
+            finish.assert_called_once()
+        self.core.command("cancel", {})
+        with self.assertRaises(ValueError):
+            self.core.command("settings", {"tap_threshold_ms": 0})
+
+    def test_rapid_hotkey_events_keep_press_before_release(self):
+        self.core.command("settings", {"mode": "hybrid"})
+        self.core.hotkey_enabled = True
+        self.core._hotkey("press", 0)
+        self.core._hotkey("release", 10)
+        self.core.hotkey_events.join()
+        self.assertEqual(self.core.state, "locked")
+        self.core._hotkey("press", 0)
+        self.core._hotkey("abort", 0)
+        self.core.hotkey_events.join()
+        self.assertEqual(self.core.state, "locked")
+        self.core.command("cancel", {})
+
+    def test_insertion_rejects_changed_target(self):
+        if os.name != "nt":
+            self.skipTest("Windows only")
+        from windows_support import insert_text
+        with patch("windows_support.foreground_window", return_value=123):
+            with self.assertRaisesRegex(OSError, "focused window changed"):
+                insert_text("hello", expected_window=456)
+
+    def test_pill_placement_uses_taskbar_edge(self):
+        from ctypes import wintypes
+        screen = wintypes.RECT(-1920, 0, 0, 1080)
+        self.assertEqual(pill_position(wintypes.RECT(-1920, 0, 0, 1040), screen, 100, 40, 10),
+                         (-1010, 990))
+        self.assertEqual(pill_position(wintypes.RECT(-1920, 40, 0, 1080), screen, 100, 40, 10),
+                         (-1010, 50))
+        self.assertEqual(pill_position(wintypes.RECT(-1880, 0, 0, 1080), screen, 100, 40, 10),
+                         (-1870, 520))
+        self.assertEqual(pill_position(wintypes.RECT(-1920, 0, -40, 1080), screen, 100, 40, 10),
+                         (-150, 520))
 
     def test_guards(self):
         self.assertTrue(engine.cleanup_needed("meet at six sorry seven"))

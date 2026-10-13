@@ -3,6 +3,7 @@
 import ctypes
 import os
 import threading
+import time
 from ctypes import wintypes
 
 
@@ -89,9 +90,15 @@ class INPUT(ctypes.Structure):
     _fields_ = [("type", wintypes.DWORD), ("data", _UNION)]
 
 
-def insert_text(text):
+def foreground_window():
+    return user32.GetForegroundWindow() if os.name == "nt" else None
+
+
+def insert_text(text, expected_window=None):
     if os.name != "nt":
         raise OSError("text insertion requires Windows")
+    if expected_window is not None and foreground_window() != expected_window:
+        raise OSError("focused window changed during dictation")
     raw = text.encode("utf-16-le")
     items = (INPUT * len(raw))()
     for offset in range(0, len(raw), 2):
@@ -135,6 +142,8 @@ class Hotkey:
         self.keys = set(keys)
         self.down = set()
         self.active = False
+        self.interrupted = False
+        self.pressed_at = 0.0
         self.ready = threading.Event()
         self.error = None
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -162,14 +171,30 @@ class Hotkey:
                     key = {0xA2: 0x11, 0xA3: 0x11, 0x5C: 0x5B}.get(event.vkCode, event.vkCode)
                     if message in (0x100, 0x104):
                         self.down.add(key)
-                        if not self.active and self.keys <= self.down:
-                            self.active = True
-                            self.callback("press")
-                    elif message in (0x101, 0x105):
-                        self.down.discard(key)
-                        if self.active and not self.keys <= self.down:
+                        if self.active and key not in self.keys:
                             self.active = False
-                            self.callback("release")
+                            self.interrupted = True
+                            self.callback("abort", 0)
+                        elif key in self.keys and not self.active and not self.interrupted and self.keys <= self.down:
+                            self.active = True
+                            self.pressed_at = time.monotonic()
+                            self.callback("press", 0)
+                    elif message in (0x101, 0x105):
+                        if self.active and key in self.keys and key in self.down:
+                            # F24 marks the Win chord as used before Windows handles key-up.
+                            if 0x5B in self.down:
+                                dummy = (INPUT * 2)()
+                                dummy[0].type = dummy[1].type = 1
+                                dummy[0].ki = KEYBDINPUT(0x87, 0, 0, 0, 0)
+                                dummy[1].ki = KEYBDINPUT(0x87, 0, 0x0002, 0, 0)
+                                user32.SendInput(2, ctypes.byref(dummy), ctypes.sizeof(INPUT))
+                            self.down.discard(key)
+                            self.active = False
+                            self.callback("release", (time.monotonic() - self.pressed_at) * 1000)
+                        else:
+                            self.down.discard(key)
+                            if key in self.keys and not self.keys <= self.down:
+                                self.interrupted = False
             return user32.CallNextHookEx(None, code, message, pointer)
 
         self._callback = HOOK(hook)

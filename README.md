@@ -1,6 +1,6 @@
 # STT engine
 
-Local Windows 10/11 dictation with Parakeet Redux transcription, optional Qwen cleanup, a resident engine, and a terminal client. No UI is included. Runtime inference is offline after first-run downloads.
+Local Windows 10/11 dictation with Parakeet Redux transcription, optional Qwen cleanup, a resident engine, a terminal client, and a small floating pill. Runtime inference is offline after first-run downloads.
 
 ## Install
 
@@ -21,6 +21,10 @@ python -c "from client import EngineClient; c=EngineClient(); c.command('shutdow
 ```
 
 The CLI prompts for Enter to start and Enter to stop. `python stt.py --show-raw` also prints the raw transcript. Only the final text is printed normally. Cleanup can resolve spoken corrections, grammar and punctuation, and JSON beginning with “write in JSON format.” Invalid or unsafe cleanup falls back to the transcript with snippets applied.
+
+## Floating pill
+
+Run `python pill.py` and leave it running. Select a text box in another app, then hold Ctrl+Win to record and release to insert text. A quick tap (under 250 ms) locks recording; press Ctrl+Win again to send. Click the pill to start locked recording and click again to send. Right-click it to cancel. The pill does not take focus from the text box. Run `python pill.py --tap-threshold-ms 300` to adjust tap timing, or add `--smart` for optional cleanup. Close the process with Ctrl+C in its terminal. Windows can block insertion into elevated apps; an insertion failure appears on the pill, and the final text remains in history.
 
 ## Personal terms
 
@@ -49,7 +53,7 @@ python evaluate.py --manifest recordings.jsonl
 python -m unittest test_smart test_engine
 ```
 
-The hotkey defaults to Ctrl+Win. Hold the chord to record and release to send. A future client can set tap mode over IPC: first press locks, second press sends. Hotkey results type into the focused app with Unicode `SendInput`; the clipboard is untouched. Windows may block insertion into an elevated target. The final text remains in history even if insertion fails. The full client protocol is in [docs/IPC.md](docs/IPC.md), and design choices are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The hotkey defaults to Ctrl+Win. The standalone engine defaults to hold mode; the pill selects hybrid hold/tap mode. Clients can still select tap mode over IPC: first press locks, second press sends. Hotkey results type into the focused app with Unicode `SendInput`; the clipboard is untouched. Windows may block insertion into an elevated target. The final text remains in history even if insertion fails. The full client protocol is in [docs/IPC.md](docs/IPC.md), and design choices are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 For WER, create `recordings.jsonl` with one object per line:
 

@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import queue
 import secrets
 import socketserver
 import subprocess
@@ -24,7 +25,7 @@ import webrtcvad
 import smart
 import stt
 from vocabulary import apply_vocabulary
-from windows_support import ChildJob, Hotkey, foreground_app, insert_text
+from windows_support import ChildJob, Hotkey, foreground_app, foreground_window, insert_text
 
 
 APP_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "STTCore"
@@ -167,6 +168,7 @@ class DictationEngine:
         self.lock = threading.RLock()
         self.state = "idle"
         self.mode = "hold"
+        self.tap_threshold_ms = 250
         self.smart_enabled = False
         self.tier = "auto"
         self.cleaner = None
@@ -188,6 +190,7 @@ class DictationEngine:
         self.capture_rate = SAMPLE_RATE
         self.start_time = 0.0
         self.foreground = None
+        self.target_window = None
         self.insert = False
         self.replaying = False
         self.record_history = True
@@ -196,9 +199,14 @@ class DictationEngine:
             self._start_capture()
         self.hotkey = None
         self.hotkey_enabled = False
+        self.hotkey_events = queue.Queue()
+        self.hotkey_pending_finish = False
+        self.hotkey_recording = False
+        threading.Thread(target=self._hotkey_loop, daemon=True).start()
         if hotkey:
             self._enable_hotkey()
         threading.Thread(target=self._idle_loop, daemon=True).start()
+        threading.Thread(target=self._level_loop, daemon=True).start()
 
     def _start_capture(self):
         device = sd.query_devices(kind="input")
@@ -240,8 +248,12 @@ class DictationEngine:
             elif self.state == "idle":
                 self.noise = self.noise * 0.98 + level * 0.02
                 self.pre_roll.append(chunk)
-        if int(time.monotonic() * 10) != int((time.monotonic() - frames / self.rate) * 10):
-            self.emit("level", {"value": self.level})
+
+    def _level_loop(self):
+        while True:
+            time.sleep(1 / 30)
+            if self.listeners:
+                self.emit("level", {"value": self.level})
 
     def emit(self, kind, data):
         event = {"event": kind, **data}
@@ -263,14 +275,39 @@ class DictationEngine:
         self.state = value
         self.emit("state", {"value": value, "mode": self.mode})
 
-    def _hotkey(self, action):
+    def _hotkey(self, action, held_ms):
         if self.hotkey_enabled:
-            def run():
-                try:
-                    self.command(action, {"insert": True})
-                except Exception as exc:
-                    self.emit("error", {"message": str(exc)})
-            threading.Thread(target=run, daemon=True).start()
+            self.hotkey_events.put((action, held_ms))
+
+    def _hotkey_loop(self):
+        while True:
+            action, held_ms = self.hotkey_events.get()
+            try:
+                if action == "abort":
+                    self.hotkey_pending_finish = False
+                    if self.hotkey_recording and self.state == "recording":
+                        self.command("cancel", {})
+                    continue
+                if action == "press" and self.state == "locked" and self.mode == "hybrid":
+                    self.hotkey_pending_finish = True
+                    continue
+                if action == "release" and self.hotkey_pending_finish:
+                    self.hotkey_pending_finish = False
+                    self.command("press", {"insert": True})
+                    self.hotkey_recording = False
+                    continue
+                if action == "release" and self.state != "recording":
+                    continue
+                if action == "press" and self.state == "idle":
+                    self.hotkey_recording = True
+                self.command(action, {"insert": True, "held_ms": held_ms})
+                if action == "release" and self.state == "processing":
+                    self.hotkey_recording = False
+            except Exception as exc:
+                self.hotkey_recording = False
+                self.emit("error", {"message": str(exc)})
+            finally:
+                self.hotkey_events.task_done()
 
     def _enable_hotkey(self):
         if self.hotkey is None:
@@ -307,15 +344,25 @@ class DictationEngine:
         with self.lock:
             if name == "status":
                 return {"state": self.state, "mode": self.mode, "level": self.level,
+                        "tap_threshold_ms": self.tap_threshold_ms, "hotkey": self.hotkey_enabled,
                         "smart_ready": self.cleaner is not None, "sample_rate": self.rate,
                         "asr_backend": type(self.asr).__name__, "capture_ready": self.stream is not None}
             if name == "settings":
                 if self.state != "idle":
-                    raise ValueError("settings require idle state")
+                    if args != {"hotkey": False}:
+                        raise ValueError("settings require idle state")
+                    self.hotkey_enabled = False
+                    return {"mode": self.mode, "tap_threshold_ms": self.tap_threshold_ms,
+                            "smart": self.smart_enabled, "tier": self.tier, "hotkey": False}
                 if "mode" in args:
-                    if args["mode"] not in ("hold", "tap"):
-                        raise ValueError("mode must be hold or tap")
+                    if args["mode"] not in ("hold", "tap", "hybrid"):
+                        raise ValueError("mode must be hold, tap, or hybrid")
                     self.mode = args["mode"]
+                if "tap_threshold_ms" in args:
+                    threshold = args["tap_threshold_ms"]
+                    if isinstance(threshold, bool) or not isinstance(threshold, int) or not 100 <= threshold <= 1000:
+                        raise ValueError("tap_threshold_ms must be an integer from 100 to 1000")
+                    self.tap_threshold_ms = threshold
                 if "smart" in args:
                     self.smart_enabled = bool(args["smart"])
                 if "tier" in args:
@@ -335,10 +382,14 @@ class DictationEngine:
                     except Exception:
                         self.smart_enabled = False
                         raise
-                return {"mode": self.mode, "smart": self.smart_enabled, "tier": self.tier,
+                return {"mode": self.mode, "tap_threshold_ms": self.tap_threshold_ms,
+                        "smart": self.smart_enabled, "tier": self.tier,
                         "hotkey": self.hotkey_enabled}
-            if name in ("start", "press"):
-                if self.state == "locked" and self.mode == "tap":
+            click = name == "toggle"
+            if name in ("start", "press", "toggle"):
+                if self.state == "locked" and (self.mode in ("tap", "hybrid") or click):
+                    return self._finish()
+                if click and self.state == "recording":
                     return self._finish()
                 if self.state != "idle":
                     raise ValueError("engine is busy")
@@ -351,9 +402,10 @@ class DictationEngine:
                 self.speech_run = self.max_speech_run = self.quiet_frames = 0
                 self.start_time = time.perf_counter()
                 self.foreground = foreground_app()
+                self.target_window = foreground_window()
                 self.insert = bool(args.get("insert", False))
                 self.record_history = True
-                self._state("locked" if self.mode == "tap" else "recording")
+                self._state("locked" if self.mode == "tap" or click else "recording")
                 if self.smart_enabled and self.cleaner is None:
                     self.cleaner_future = self.executor.submit(self._ensure_cleaner)
                 return {"state": self.state}
@@ -362,6 +414,9 @@ class DictationEngine:
                     return {"state": self.state}
                 if self.state != "recording":
                     raise ValueError("not recording")
+                if self.mode == "hybrid" and args.get("held_ms", self.tap_threshold_ms) < self.tap_threshold_ms:
+                    self._state("locked")
+                    return {"state": self.state}
                 return self._finish()
             if name == "cancel":
                 if self.state not in ("recording", "locked"):
@@ -384,6 +439,7 @@ class DictationEngine:
                 self.pending = []
                 self.start_time = time.perf_counter()
                 self.foreground = foreground_app()
+                self.target_window = foreground_window()
                 self.insert = bool(args.get("insert", False))
                 self.record_history = bool(args.get("history", False))
                 self._state("locked" if self.mode == "tap" else "recording")
@@ -440,7 +496,9 @@ class DictationEngine:
             if self.insert and final:
                 start = time.perf_counter()
                 try:
-                    insert_text(final)
+                    if not self.target_window:
+                        raise OSError("no focused target window")
+                    insert_text(final, self.target_window)
                 except OSError as exc:
                     self.emit("error", {"message": f"Text insertion failed: {exc}"})
                 timings["insert_ms"] = round((time.perf_counter() - start) * 1000, 1)
