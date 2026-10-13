@@ -10,3 +10,8 @@ runtime/parakeet-lib/
 runtime/*.zip
 runtime/*.part
 benchmark-results*.json
+build/
+dist/
+*.spec
+build-output.log
+artifacts/
