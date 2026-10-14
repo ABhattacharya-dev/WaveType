@@ -1,1 +1,2 @@
 sounddevice
+webrtcvad-wheels==2.0.14.post1
