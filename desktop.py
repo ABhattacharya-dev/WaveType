@@ -21,6 +21,7 @@ from windows_support import ChildJob
 
 
 PREFERENCES = APP_DIR / "ui.json"
+ASSETS = Path(__file__).resolve().parent / "assets"
 RELEASES = "https://github.com/ABhattacharya-dev/stt-core-structure/releases"
 LIGHT = {"bg": "#FFFFFF", "side": "#F4F4F2", "card": "#FFFFFF", "text": "#18181B",
          "muted": "#71717A", "soft": "#A1A1AA", "line": "#E7E7E4", "accent": "#18181B",
@@ -116,10 +117,15 @@ class TrayIcon:
         self.data.uFlags = 1 | 2 | 4  # message, icon, tooltip
         self.data.uCallbackMessage = self.MESSAGE
         user32 = ctypes.windll.user32
-        user32.LoadIconW.restype = wintypes.HICON
-        self.data.hIcon = user32.LoadIconW(None, ctypes.c_void_p(32512))
-        self.data.szTip = "STT Core dictation"
+        user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
+                                     ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        user32.LoadImageW.restype = wintypes.HANDLE
+        self.data.hIcon = user32.LoadImageW(None, str(ASSETS / "WaveType.ico"), 1, 0, 0, 0x10 | 0x40)
+        if not self.data.hIcon:
+            raise ctypes.WinError()
+        self.data.szTip = "WaveType dictation"
         if not ctypes.windll.shell32.Shell_NotifyIconW(0, ctypes.byref(self.data)):
+            self.close()
             raise ctypes.WinError()
 
     def message(self, message, _wparam, lparam):
@@ -131,6 +137,10 @@ class TrayIcon:
 
     def close(self):
         ctypes.windll.shell32.Shell_NotifyIconW(2, ctypes.byref(self.data))
+        if self.data.hIcon:
+            ctypes.windll.user32.DestroyIcon.argtypes = [wintypes.HICON]
+            ctypes.windll.user32.DestroyIcon(self.data.hIcon)
+            self.data.hIcon = None
 
 
 class DesktopApp:
@@ -162,7 +172,8 @@ class DesktopApp:
             if path.is_file() and ctypes.windll.gdi32.AddFontResourceExW(str(path), 0x10, None):
                 self.ui_fonts[style] = family
         self.main = tk.Toplevel(self.root)
-        self.main.title("STT Core")
+        self.main.title("WaveType")
+        self.main.iconbitmap(str(ASSETS / "WaveType.ico"))
         work = wintypes.RECT()
         if ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(work), 0):
             width = min(1100, work.right - work.left - 40)
@@ -183,7 +194,7 @@ class DesktopApp:
         self.menu = tk.Menu(self.root, tearoff=False)
         self.tray_smart_var = tk.BooleanVar(value=bool(self.preferences.get("smart", False)))
         self.smart_pending = False
-        self.menu.add_command(label="STT", command=self.show)
+        self.menu.add_command(label="WaveType", command=self.show)
         self.menu.add_checkbutton(label="Smart cleanup", variable=self.tray_smart_var,
                                   command=self.toggle_tray_smart)
         self.menu.add_separator()
@@ -244,9 +255,9 @@ class DesktopApp:
             self.update_apply_visibility()
 
     def show(self):
+        self.style_titlebar()
         self.main.deiconify()
         self.main.update_idletasks()
-        self.style_titlebar()
         self.main.lift()
         self.main.focus_force()
         self.refresh_page()
@@ -256,15 +267,13 @@ class DesktopApp:
         user32.GetAncestor.argtypes = (wintypes.HWND, wintypes.UINT)
         user32.GetAncestor.restype = wintypes.HWND
         hwnd = user32.GetAncestor(self.main.winfo_id(), 2)
-        owner = user32.GetAncestor(self.root.winfo_id(), 2)
         user32.GetWindowLongPtrW.argtypes = (wintypes.HWND, ctypes.c_int)
         user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
         user32.SetWindowLongPtrW.argtypes = (wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t)
         user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
-        # Ownership hides the taskbar entry without the tool-window caption that hides minimize.
-        if owner != hwnd:
-            user32.SetWindowLongPtrW(hwnd, -8, owner)
-        extended = user32.GetWindowLongPtrW(hwnd, -20) & ~(0x80 | 0x40000)
+        # Only the main window gets a taskbar entry; withdrawing it leaves the tray active.
+        user32.SetWindowLongPtrW(hwnd, -8, 0)
+        extended = (user32.GetWindowLongPtrW(hwnd, -20) | 0x40000) & ~0x80
         user32.SetWindowLongPtrW(hwnd, -20, extended)
         style = user32.GetWindowLongPtrW(hwnd, -16)
         user32.SetWindowLongPtrW(hwnd, -16, (style | 0x20000 | 0x80000) & ~(0x10000 | 0x40000))
@@ -403,14 +412,11 @@ class DesktopApp:
         side.pack_propagate(False)
         brand = tk.Frame(side, bg=c["side"])
         brand.pack(fill="x", padx=20, pady=(22, 26))
-        waves = tk.Canvas(brand, width=18, height=18, bg=c["side"], highlightthickness=0)
-        waves.pack(side="left", padx=(0, 8))
-        for index, height in enumerate((8, 16, 12, 18, 10)):
-            waves.create_line(2 + index * 3.3, (18 - height) / 2, 2 + index * 3.3,
-                              (18 + height) / 2, fill=c["text"], width=2.5, capstyle="round")
-        self.label(brand, "STT", 13, weight="bold").pack(side="left")
+        if not hasattr(self, "brand_image"):
+            self.brand_image = tk.PhotoImage(master=self.root, file=str(ASSETS / "logo_expanded.png"))
+        tk.Label(brand, image=self.brand_image, bg=c["side"], bd=0).pack(side="left")
         tk.Label(brand, text="Beta", bg="#EADBFC" if self.theme != "Dark" else c["button"],
-                 fg=c["link"], font=self.font(8, "bold"), padx=7, pady=2).pack(side="left", padx=8)
+                 fg=c["link"], font=self.font(8, "bold"), padx=5, pady=2).pack(side="left", padx=(6, 0))
         self.nav_buttons = {}
         for page in ("History", "Dictionary", "Settings"):
             row = tk.Frame(side, bg=c["button"] if self.page == page else c["side"],
@@ -866,7 +872,7 @@ class DesktopApp:
             ("Language", "Automatic language detection", "language"),
             ("Theme", "Application color scheme", "theme"),
             ("Smart cleanup", "Optional local Qwen model; downloads on first use", "smart"),
-            ("Start when I sign in", "Launch STT Core when Windows starts", "login"),
+            ("Start when I sign in", "Launch WaveType when Windows starts", "login"),
         )
         for index, (title, description, control) in enumerate(settings):
             if index:
@@ -905,9 +911,8 @@ class DesktopApp:
                 theme_box = tk.Frame(row, bg=self.colors["button"], padx=3, pady=3)
                 theme_box.pack(side="right")
                 self.theme_buttons = {}
-                for value, text in (("Light", "☀ Light"), ("Dark", "☾ Dark"),
-                                    ("System", "▣ System")):
-                    button = tk.Button(theme_box, text=text, relief="flat", bd=0,
+                for value in ("Light", "Dark", "System"):
+                    button = tk.Button(theme_box, text=" " + value, compound="left", relief="flat", bd=0,
                                        cursor="hand2", font=self.font(9), padx=10, pady=4,
                                        command=lambda selected=value: self.choose_theme(selected))
                     button.pack(side="left", padx=2)
@@ -918,8 +923,11 @@ class DesktopApp:
                 toggle = tk.Canvas(row, width=44, height=24, bg=self.colors["subtle"],
                                    highlightthickness=0, cursor="hand2")
                 toggle.pack(side="right")
-                toggle.bind("<Button-1>", lambda _event, var=variable, canvas=toggle:
-                            (var.set(not var.get()), self.draw_toggle(canvas, var.get())))
+                toggle.bind("<Button-1>", lambda _event, var=variable: var.set(not var.get()))
+                trace = variable.trace_add("write", lambda *_args, var=variable, canvas=toggle:
+                                           self.draw_toggle(canvas, var.get()))
+                toggle.bind("<Destroy>", lambda _event, var=variable, token=trace:
+                            var.trace_remove("write", token))
                 self.draw_toggle(toggle, variable.get())
         self.label(inside, "Signed releases can be checked on GitHub. Dictation stays local.",
                    9, color="muted").pack(fill="x", pady=(20, 9))
@@ -929,12 +937,14 @@ class DesktopApp:
         self.theme_var.set(selected)
         for name, button in self.theme_buttons.items():
             active = name == selected
+            color = self.colors["text"] if active else self.colors["muted"]
             button.configure(bg=self.colors["card"] if active else self.colors["button"],
-                             fg=self.colors["text"] if active else self.colors["muted"])
+                             fg=color, image=self.icon_image(
+                                 {"Light": "sun", "Dark": "moon", "System": "monitor"}[name], color))
 
     def draw_toggle(self, canvas, enabled):
         canvas.delete("all")
-        track = self.colors["text"] if enabled else self.colors["soft"]
+        track = LIGHT["text"] if enabled else LIGHT["soft"]
         canvas.create_oval(0, 0, 24, 24, fill=track, outline=track)
         canvas.create_oval(20, 0, 44, 24, fill=track, outline=track)
         canvas.create_rectangle(12, 0, 32, 24, fill=track, outline=track)

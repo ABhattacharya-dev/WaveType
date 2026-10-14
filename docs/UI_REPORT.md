@@ -2,7 +2,7 @@
 
 ## Scope and decisions
 
-The UI is a separate Tkinter/Win32 process. It talks to the engine only through its documented loopback IPC client. The main window is created once and hidden until opened; the pill remains a no-activate topmost tool window. The tray menu contains STT, a Smart cleanup toggle, and Exit. A lock on `%LOCALAPPDATA%/STTCore/ui.lock` permits one UI instance. The login option uses the current user's Run key. Light, dark, and system palettes are available.
+The UI is a separate Tkinter/Win32 process. It talks to the engine only through its documented loopback IPC client. The main window is created once and hidden until opened; the pill remains a no-activate topmost tool window. The tray menu contains WaveType, a Smart cleanup toggle, and Exit. A lock on `%LOCALAPPDATA%/STTCore/ui.lock` permits one UI instance. The login option uses the current user's Run key. Light, dark, and system palettes are available.
 
 History groups final text by date with time and app name; delete appears when a row is hovered. Dictionary manages snippets and vocabulary. Settings expose the current Ctrl+Win hybrid hotkey's tap threshold, microphone, CPU/auto tier, optional cleanup, automatic language mode, theme, and start on login. Setup waits for verified first-run model downloads. About shows model and runtime attribution.
 

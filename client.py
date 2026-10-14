@@ -16,7 +16,7 @@ class EngineClient:
     def __init__(self, start=False, no_mic=False, job=None):
         if start and not self._reachable():
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            executable = (Path(sys.executable).parent / "engine" / "STTEngine.exe"
+            executable = (Path(sys.executable).parent / "engine" / "WaveTypeEngine.exe"
                           if getattr(sys, "frozen", False) else None)
             command = ([str(executable), "serve"] if executable else
                        [sys.executable, str(Path(__file__).with_name("engine.py")), "serve"])

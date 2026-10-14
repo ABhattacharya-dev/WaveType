@@ -259,16 +259,38 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(app.preferences["theme"], "Dark")
             self.assertEqual(app.settings_apply.winfo_manager(), "")
             self.assertEqual(app.main.winfo_children()[0].cget("bg"), DARK["bg"])
+            with patch.object(app, "save_preferences"), patch.object(
+                    app, "draw_toggle", wraps=app.draw_toggle) as draw:
+                app.after_tray_smart({"smart": True}, None)
+                self.assertTrue(app.smart_var.get())
+                canvas, enabled = draw.call_args.args
+                self.assertTrue(enabled)
+                self.assertEqual(canvas.coords(canvas.find_all()[-1]), [23, 3, 41, 21])
+                self.assertEqual(app.settings_apply.winfo_manager(), "")
+                app.threshold_var.set("300")
+                app.after_tray_smart({"smart": False}, None)
+                self.assertFalse(app.smart_var.get())
+                self.assertEqual(canvas.coords(canvas.find_all()[-1]), [3, 3, 21, 21])
+                self.assertEqual(app.threshold_var.get(), "300")
+                self.assertEqual(app.settings_apply.winfo_manager(), "pack")
             app.style_titlebar()
             import ctypes
             user32 = ctypes.windll.user32
             hwnd = user32.GetAncestor(app.main.winfo_id(), 2)
-            self.assertEqual(user32.GetWindowLongPtrW(hwnd, -20) & (0x80 | 0x40000), 0)
+            self.assertEqual(user32.GetWindowLongPtrW(hwnd, -20) & (0x80 | 0x40000), 0x40000)
             self.assertTrue(user32.GetWindowLongPtrW(hwnd, -16) & 0x20000)
             self.assertEqual(user32.GetWindowLongPtrW(hwnd, -16) & (0x10000 | 0x40000), 0)
-            self.assertEqual(user32.GetWindowLongPtrW(hwnd, -8),
-                             user32.GetAncestor(root.winfo_id(), 2))
+            self.assertEqual(user32.GetWindowLongPtrW(hwnd, -8), 0)
+            app.main.iconify()
             root.update()
+            self.assertEqual(app.main.state(), "iconic")
+            self.assertTrue(user32.GetWindowLongPtrW(hwnd, -20) & 0x40000)
+            app.hide()
+            self.assertEqual(app.main.state(), "withdrawn")
+            self.assertTrue(app.main.winfo_exists())
+            app.show()
+            root.update()
+            self.assertEqual(app.main.state(), "normal")
         finally:
             root.destroy()
 

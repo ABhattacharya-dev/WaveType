@@ -1,9 +1,11 @@
 Unicode true
 !include "MUI2.nsh"
+!define MUI_ICON "assets\WaveType.ico"
+!define MUI_UNICON "assets\WaveType.ico"
 
-Name "STT Core"
-OutFile "dist\STTCore-Setup.exe"
-InstallDir "$LOCALAPPDATA\Programs\STT Core"
+Name "WaveType"
+OutFile "dist\WaveType-Setup.exe"
+InstallDir "$LOCALAPPDATA\Programs\WaveType"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 
@@ -14,19 +16,19 @@ SetCompressor /SOLID lzma
 
 Section "Install"
   SetOutPath "$INSTDIR"
-  File /r "dist\STTCore\*.*"
+  File /r "dist\WaveType\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  CreateDirectory "$SMPROGRAMS\STT Core"
-  CreateShortCut "$SMPROGRAMS\STT Core\STT Core.lnk" "$INSTDIR\STTCore.exe"
-  CreateShortCut "$DESKTOP\STT Core.lnk" "$INSTDIR\STTCore.exe"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\STT Core" "DisplayName" "STT Core"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\STT Core" "UninstallString" '"$INSTDIR\Uninstall.exe"'
+  CreateDirectory "$SMPROGRAMS\WaveType"
+  CreateShortCut "$SMPROGRAMS\WaveType\WaveType.lnk" "$INSTDIR\WaveType.exe"
+  CreateShortCut "$DESKTOP\WaveType.lnk" "$INSTDIR\WaveType.exe"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType" "DisplayName" "WaveType"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType" "UninstallString" '"$INSTDIR\Uninstall.exe"'
 SectionEnd
 
 Section "Uninstall"
-  Delete "$DESKTOP\STT Core.lnk"
-  RMDir /r "$SMPROGRAMS\STT Core"
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\STT Core"
+  Delete "$DESKTOP\WaveType.lnk"
+  RMDir /r "$SMPROGRAMS\WaveType"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "STT Core"
   RMDir /r "$INSTDIR"
 SectionEnd

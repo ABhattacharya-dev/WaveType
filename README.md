@@ -1,4 +1,4 @@
-# STT engine
+# WaveType
 
 Local Windows 10/11 dictation with Parakeet Redux transcription, optional Qwen cleanup, a resident engine, a terminal client, and a small floating pill with a desktop window. Runtime inference is offline after first-run downloads.
 
@@ -14,7 +14,7 @@ python -m pip install -r requirements.txt
 
 Start the terminal client with `python stt.py`. On first run the engine downloads the Parakeet GGUF and its small Windows C API library, resumes interrupted downloads, and verifies SHA-256. `runtime/parakeet-cli.exe` is included as a fallback. Answer `y` at **Smart cleanup? [y/N]:** to download and warm Qwen3 4B plus the verified llama.cpp runtime. The NVIDIA package includes CUDA runtime DLLs; it does not require an installed CUDA toolkit. A CPU package is selected when no suitable NVIDIA GPU is found. Model and runtime files are ignored by Git. Subsequent runs need no internet.
 
-Run `python desktop.py` for the Windows app. Its first-run screen waits while the engine downloads and verifies Parakeet. Later launches show only the pill and notification-area icon; right-click the icon and choose **STT** to open History, Dictionary, Settings, and About, or **Exit** to stop the app and its engine. Closing the main window leaves dictation active. The default light theme uses a warm off-white palette. System and dark themes are available in Settings. The app owns the engine as a hidden child process and communicates through the local [IPC API](docs/IPC.md).
+Run `python desktop.py` for the Windows app. Its first-run screen waits while the engine downloads and verifies Parakeet. Later launches show only the pill and notification-area icon; right-click the icon and choose **WaveType** to open History, Dictionary, Settings, and About, or **Exit** to stop the app and its engine. The main window appears in the taskbar while open or minimized. Closing it removes the taskbar entry and leaves dictation active in the tray. The Smart cleanup toggle stays synchronized between the tray and Settings. The default light theme uses a warm off-white palette. System and dark themes are available in Settings. The app owns the engine as a hidden child process and communicates through the local [IPC API](docs/IPC.md).
 
 This branch contains the current source app. Installer sources (`build.ps1` and `installer.nsi`) are retained for the next release; the current changes have not been packaged. Earlier development installers were checked on this Windows 11 machine, but clean-VM validation and signing remain [release gates](docs/RELEASE.md).
 
@@ -98,3 +98,7 @@ GTX 1650 4 GB / Ryzen 7 4800H, one seven-second sample WAV replayed three measur
 | Engine CPU-only | 0.74/0.86 s | 3.02/3.05 s | 3.76/3.94 s |
 
 Enabling prompt caching cut a short correction's GPU cleanup from about 4.0 s to 0.24–0.43 s after warmup; CPU cleanup took 1.21 s on the same short correction after a 13.94 s startup. The 32-case text fixture benchmark passed 29 cases with 0.404 s median cleanup. Its misses were a grammar singular/plural change, one extra comma, and a JSON quantity correction that kept the old number. Valid JSON can still be semantically wrong. Redux cannot use `parakeet-cli --stream`; its CLI reports that the model is not cache-aware. Pauses can be transcribed in the background, but the final segment still incurs ASR work at release. An official 213 MB packed Redux model produced the same sample text but took 25–27 s per clip on this CPU/build, so Q8 remains the default.
+
+## Branding
+
+The app icon is generated from `assets/logo.svg`; the sidebar uses `assets/logo_expanded.svg`. Windows/Tk use the checked-in `WaveType.ico` and `logo_expanded.png` derivatives, so no SVG renderer is needed at runtime. The existing `STTCore` data folder and login registry value are retained for compatibility with saved settings and history.
