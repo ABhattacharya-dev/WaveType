@@ -56,3 +56,7 @@ Five warm raw replays of the same synthetic WAV, with no UI and Smart cleanup of
 | Observed idle level events / second | 29.6 | 0.34 |
 
 The short idle samples covered 5.00 and 5.88 seconds respectively; steady inactive cadence is one event per five seconds. Both replay runs returned identical text. The later ASR run was slower; this cleanup does not demonstrate an inference speedup. Client overhead stayed below 0.5 ms at p50. These samples measure reduced idle IPC traffic, not a new RAM/CPU benchmark or physical hotkey latency.
+
+## First public x64 preview
+
+The 0.1.0-beta.1 installer now packages the WaveType brand and current source UI. It adds selectable shortcuts/startup, folder selection, optional cleanup download, model-setup progress and a developer-page checkbox. Historical packaging statements above refer to earlier source reviews. This release was compiled and statically reviewed without running tests or installation checks, as requested. Signing and Defender/clean-machine validation remain pending; see RELEASE.md.

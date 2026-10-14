@@ -34,7 +34,7 @@ def _sha256(path):
     return digest.hexdigest()
 
 
-def fetch(path, url, expected):
+def fetch(path, url, expected, progress=None):
     path = Path(path)
     if path.is_file() and _sha256(path) == expected:
         return path
@@ -48,7 +48,16 @@ def fetch(path, url, expected):
     with urllib.request.urlopen(request, timeout=60) as response:
         append = offset and response.status == 206
         with partial.open("ab" if append else "wb") as output:
-            shutil.copyfileobj(response, output, 1024 * 1024)
+            if progress is None:
+                shutil.copyfileobj(response, output, 1024 * 1024)
+            else:
+                downloaded = offset if append else 0
+                length = int(response.headers.get("Content-Length", 0))
+                total = downloaded + length if length else 0
+                for chunk in iter(lambda: response.read(1024 * 1024), b""):
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress(path.name, downloaded, total)
     if _sha256(partial) != expected:
         partial.unlink(missing_ok=True)
         raise ValueError(f"download integrity check failed: {path.name}")
@@ -80,19 +89,19 @@ def free_memory_gb():
     return state.ullAvailPhys / (1024 ** 3)
 
 
-def ensure_asr():
+def ensure_asr(progress=None):
     bundled_cli = Path(getattr(sys, "_MEIPASS", "")) / "runtime" / "parakeet-cli.exe"
     if getattr(sys, "frozen", False) and not (stt.RUNTIME / "parakeet-cli.exe").is_file():
         if not bundled_cli.is_file():
             raise FileNotFoundError("bundled Parakeet CLI is missing")
         stt.RUNTIME.mkdir(parents=True, exist_ok=True)
         shutil.copy2(bundled_cli, stt.RUNTIME / "parakeet-cli.exe")
-    fetch(stt.RUNTIME / "redux-q8_0.gguf", *ASR)
+    fetch(stt.RUNTIME / "redux-q8_0.gguf", *ASR, progress=progress)
     if not (stt.RUNTIME / "parakeet-cli.exe").is_file():
         raise FileNotFoundError("parakeet-cli.exe is missing from runtime")
     library = stt.RUNTIME / "parakeet-lib" / "parakeet-v0.6.1-lib-win-cpu-x64" / "parakeet.dll"
     if not library.is_file():
-        archive = fetch(stt.RUNTIME / "parakeet-lib.zip", *ASR_LIBRARY)
+        archive = fetch(stt.RUNTIME / "parakeet-lib.zip", *ASR_LIBRARY, progress=progress)
         _extract(archive, stt.RUNTIME / "parakeet-lib")
         archive.unlink(missing_ok=True)
     return library
@@ -113,16 +122,36 @@ def _extract(archive, destination):
                     shutil.copyfileobj(source, output)
 
 
-def ensure_cleanup(cpu_only=False):
+def ensure_cleanup(cpu_only=False, progress=None):
     gpu = not cpu_only and gpu_available()
     if not gpu and free_memory_gb() < 3.5:
         raise MemoryError("not enough free RAM for optional cleanup; use raw dictation")
-    fetch(smart.MODEL, *CLEANUP)
+    fetch(smart.MODEL, *CLEANUP, progress=progress)
     destination = smart.RUNTIME / ("smart" if gpu else "smart-cpu")
     if not (destination / "llama-server.exe").is_file():
         packages = (GPU, CUDART) if gpu else (CPU,)
         for filename, digest in packages:
-            archive = fetch(smart.RUNTIME / filename, RELEASE + filename, digest)
+            archive = fetch(smart.RUNTIME / filename, RELEASE + filename, digest, progress=progress)
             _extract(archive, destination)
             archive.unlink()
     return destination / "llama-server.exe", 99 if gpu else 0
+
+
+def setup_models(cleanup=False):
+    """Installer entry point: downloads only, without microphone or model inference."""
+    percentages = {}
+
+    def progress(name, downloaded, total):
+        percent = int(downloaded * 100 / total) if total else 0
+        if percent >= percentages.get(name, -5) + 5:
+            percentages[name] = percent
+            print(f"Downloading {name}: {percent}% ({downloaded // (1024 * 1024)} MiB)", flush=True)
+
+    print("Preparing Parakeet Redux: downloading and verifying local speech files...", flush=True)
+    ensure_asr(progress=progress)
+    print("Speech recognition files are ready.", flush=True)
+    if cleanup:
+        print("Preparing optional Smart cleanup: downloading and verifying Qwen/runtime...", flush=True)
+        _, layers = ensure_cleanup(progress=progress)
+        print(f"Smart cleanup files are ready ({'NVIDIA GPU' if layers else 'CPU'} tier).", flush=True)
+    print("Setup complete. Speech processing runs locally.", flush=True)
