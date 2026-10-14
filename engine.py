@@ -10,6 +10,7 @@ import queue
 import secrets
 import socketserver
 import subprocess
+import sys
 import threading
 import time
 import wave
@@ -690,8 +691,17 @@ def serve(capture=True, hotkey=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("serve", nargs="?")
+    parser.add_argument("action", nargs="?", default="serve", choices=("serve", "setup"))
     parser.add_argument("--no-mic", action="store_true")
     parser.add_argument("--hotkey", action="store_true")
+    parser.add_argument("--cleanup", action="store_true", help="Download optional cleanup files during setup")
     options = parser.parse_args()
-    serve(capture=not options.no_mic, hotkey=options.hotkey)
+    if options.action == "setup":
+        from model_manager import setup_models
+        try:
+            setup_models(cleanup=options.cleanup)
+        except (OSError, ValueError, MemoryError) as exc:
+            print(f"Model setup could not finish: {exc}. Launch WaveType to retry.", file=sys.stderr)
+            raise SystemExit(1)
+    else:
+        serve(capture=not options.no_mic, hotkey=options.hotkey)

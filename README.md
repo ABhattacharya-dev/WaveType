@@ -2,10 +2,18 @@
 
 Local Windows 10/11 dictation with Parakeet Redux transcription, optional Qwen cleanup, a resident engine, a terminal client, and a small floating pill with a desktop window. Runtime inference is offline after first-run downloads.
 
-## Install
+## Windows installer
+
+Download `WaveType-0.1.0-beta.1-Setup-x64.exe` from the [GitHub prerelease](https://github.com/ABhattacharya-dev/stt-core-structure/releases/tag/v0.1.0-beta.1). It is for Intel/AMD x64 Windows 10/11 and includes Python, the app and the engine. Keep Defender enabled: this first preview is unsigned, and clean-machine and Defender validation are pending. The release includes SHA-256 checksums.
+
+The wizard lets you choose an installation folder, Start Menu and desktop shortcuts, startup on sign-in, and whether to download optional Smart cleanup now. Startup and Smart cleanup downloads are off by default. Setup downloads and verifies the base speech model; interrupted downloads can resume when you launch WaveType. Smart cleanup remains off until enabled in the tray or Settings, even if its files were downloaded during setup. The finish page offers app launch and an unchecked developer-page link.
+
+Speech processing runs locally after setup. Models, settings, personal dictionaries and history are retained under `%LOCALAPPDATA%\STTCore` when you uninstall. The uninstaller removes only shipped app files. Read the [privacy notes](docs/PRIVACY.md) and [release status](docs/RELEASE.md).
+
+## Run from source
 
 ```powershell
-git clone -b feature https://github.com/ABhattacharya-dev/stt-core-structure.git
+git clone -b main https://github.com/ABhattacharya-dev/stt-core-structure.git
 cd stt-core-structure
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -16,7 +24,7 @@ Start the terminal client with `python stt.py`. On first run the engine download
 
 Run `python desktop.py` for the Windows app. Its first-run screen waits while the engine downloads and verifies Parakeet. Later launches show only the pill and notification-area icon; right-click the icon and choose **WaveType** to open History, Dictionary, Settings, and About, or **Exit** to stop the app and its engine. The main window appears in the taskbar while open or minimized. Closing it removes the taskbar entry and leaves dictation active in the tray. The Smart cleanup toggle stays synchronized between the tray and Settings. The default light theme uses a warm off-white palette. System and dark themes are available in Settings. The app owns the engine as a hidden child process and communicates through the local [IPC API](docs/IPC.md).
 
-This branch contains the current source app. Installer sources (`build.ps1` and `installer.nsi`) are retained for the next release; the current changes have not been packaged. Earlier development installers were checked on this Windows 11 machine, but clean-VM validation and signing remain [release gates](docs/RELEASE.md).
+The installer is built from `build.ps1` and `installer.nsi`. The current preview was compiled after source review; no tests or clean-VM installation checks were run for this release pass, as requested. Earlier development installers were checked on this Windows 11 machine.
 
 The engine remains running after the CLI exits. It unloads Parakeet after about 20 idle seconds and the optional cleanup model after five idle minutes. Stop it with:
 
@@ -101,4 +109,4 @@ Enabling prompt caching cut a short correction's GPU cleanup from about 4.0 s to
 
 ## Branding
 
-The app icon is generated from `assets/logo.svg`; the sidebar uses `assets/logo_expanded.svg`. Windows/Tk use the checked-in `WaveType.ico` and `logo_expanded.png` derivatives, so no SVG renderer is needed at runtime. The existing `STTCore` data folder and login registry value are retained for compatibility with saved settings and history.
+The app icon is generated from `assets/logo.svg`; the sidebar uses `assets/logo_expanded.svg`. Windows/Tk use the checked-in `WaveType.ico` and `logo_expanded.png` derivatives, so no SVG renderer is needed at runtime. The existing `STTCore` data folder is retained for compatibility with saved settings and history. Startup uses the WaveType registry value and migrates the previous STT Core value when changed.

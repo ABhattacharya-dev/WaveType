@@ -1,0 +1,36 @@
+WaveType - Windows x64 preview
+
+WaveType processes speech and optional Smart cleanup on this computer.
+It does not upload recordings, dictation text, history, or personal dictionaries.
+Missing models and runtimes are downloaded over HTTPS from Hugging Face and
+GitHub and verified against pinned SHA-256 hashes. Subsequent dictation works
+offline. Links open in your browser only when you choose them.
+
+The microphone remains open while the engine runs for a short in-memory
+pre-roll. Recorded audio is processed in memory and is not saved in history.
+History stores date, time, final text and app name as readable local JSON.
+You can delete individual history entries in the app. Local data and model
+files are kept in %LOCALAPPDATA%\STTCore and are retained on uninstall.
+An app you dictate into may itself send or sync the inserted text.
+
+Startup is optional. The global keyboard hook handles the dictation shortcut;
+WaveType does not store ordinary keystrokes. Choose Exit from the tray to stop
+the app, microphone capture, engine and cleanup subprocesses.
+
+This preview is unsigned. A trusted code-signing certificate, clean-machine
+validation and a Defender scan of the final package are still pending. A clean
+antivirus result and absence of SmartScreen warnings are not guaranteed.
+Never disable antivirus or add exclusions to run WaveType.
+
+Third-party components:
+Parakeet Redux weights: CC BY 4.0 (Moondream and NVIDIA).
+Qwen3 cleanup weights: Apache 2.0 (Qwen Team), optional download.
+parakeet.cpp and llama.cpp runtimes: MIT.
+Optional NVIDIA CUDA runtime: NVIDIA redistributable terms.
+Inter, Figtree, EB Garamond and JetBrains Mono: SIL OFL 1.1.
+Lordicon lock animation: user-supplied PRO asset; applicable license required.
+Python, Tcl/Tk, sounddevice, PortAudio, CFFI and WebRTC VAD: upstream licenses.
+Full notices and available license texts are installed with the application.
+
+Developer: https://github.com/ABhattacharya-dev
+Source: https://github.com/ABhattacharya-dev/stt-core-structure

@@ -80,7 +80,13 @@ def login_enabled():
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                             r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
-            return winreg.QueryValueEx(key, "STT Core")[0] == startup_command()
+            for name in ("WaveType", "STT Core"):
+                try:
+                    if winreg.QueryValueEx(key, name)[0] == startup_command():
+                        return True
+                except FileNotFoundError:
+                    pass
+            return False
     except OSError:
         return False
 
@@ -90,10 +96,10 @@ def set_login(enabled):
                        r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
                        winreg.KEY_SET_VALUE) as key:
         if enabled:
-            winreg.SetValueEx(key, "STT Core", 0, winreg.REG_SZ, startup_command())
-        else:
+            winreg.SetValueEx(key, "WaveType", 0, winreg.REG_SZ, startup_command())
+        for name in (("STT Core",) if enabled else ("WaveType", "STT Core")):
             try:
-                winreg.DeleteValue(key, "STT Core")
+                winreg.DeleteValue(key, name)
             except FileNotFoundError:
                 pass
 
@@ -929,7 +935,7 @@ class DesktopApp:
                 toggle.bind("<Destroy>", lambda _event, var=variable, token=trace:
                             var.trace_remove("write", token))
                 self.draw_toggle(toggle, variable.get())
-        self.label(inside, "Signed releases can be checked on GitHub. Dictation stays local.",
+        self.label(inside, "Releases can be checked on GitHub. Dictation stays local.",
                    9, color="muted").pack(fill="x", pady=(20, 9))
         self.button(inside, "Open releases", lambda: webbrowser.open(RELEASES)).pack(anchor="w")
 
