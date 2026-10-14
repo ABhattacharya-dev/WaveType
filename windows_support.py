@@ -49,7 +49,7 @@ class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
 
 
 class ChildJob:
-    def __init__(self):
+    def __init__(self, assign_self=True):
         if os.name != "nt":
             self.handle = None
             return
@@ -61,9 +61,19 @@ class ChildJob:
         if not kernel32.SetInformationJobObject(self.handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
             self.close()
             raise ctypes.WinError(ctypes.get_last_error())
-        if not kernel32.AssignProcessToJobObject(self.handle, kernel32.GetCurrentProcess()):
+        if assign_self and not kernel32.AssignProcessToJobObject(self.handle, kernel32.GetCurrentProcess()):
             self.close()
             raise ctypes.WinError(ctypes.get_last_error())
+
+    def assign(self, pid):
+        process = kernel32.OpenProcess(0x0101, False, pid)  # SET_QUOTA | TERMINATE
+        if not process:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            if not kernel32.AssignProcessToJobObject(self.handle, process):
+                raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            kernel32.CloseHandle(process)
 
     def close(self):
         if self.handle:
@@ -134,6 +144,18 @@ def foreground_app():
     return {"process": executable, "title": title.value, "pid": pid.value}
 
 
+def consume_win_keyup(vk, scan):
+    events = (INPUT * 3)()
+    for event in events:
+        event.type = 1
+    # A function key can trigger a laptop's touchpad hotkey. VK_NONAME is
+    # reserved and has no corresponding function-key action.
+    events[0].ki = KEYBDINPUT(0xFC, 0, 0, 0, 0)
+    events[1].ki = KEYBDINPUT(0xFC, 0, 0x0002, 0, 0)
+    events[2].ki = KEYBDINPUT(vk, scan, 0x0003, 0, 0)  # Win up, extended
+    return user32.SendInput(3, ctypes.byref(events), ctypes.sizeof(INPUT)) == 3
+
+
 class Hotkey:
     """Low-level hook; supports modifier-only chords which RegisterHotKey cannot."""
 
@@ -143,6 +165,7 @@ class Hotkey:
         self.down = set()
         self.active = False
         self.interrupted = False
+        self.consume_win_up = False
         self.pressed_at = 0.0
         self.ready = threading.Event()
         self.error = None
@@ -157,6 +180,38 @@ class Hotkey:
         if self.error:
             raise self.error
 
+    def _on_key(self, vk, scan, flags, message):
+        if flags & 0x10:  # Ignore our injected replacement key-up.
+            return False
+        key = {0xA2: 0x11, 0xA3: 0x11, 0x5C: 0x5B}.get(vk, vk)
+        if message in (0x100, 0x104):
+            if self.consume_win_up and key not in self.keys:
+                self.consume_win_up = False
+            self.down.add(key)
+            if self.active and key not in self.keys:
+                self.active = False
+                self.interrupted = True
+                self.callback("abort", 0)
+            elif key in self.keys and not self.active and not self.interrupted and self.keys <= self.down:
+                self.active = True
+                self.pressed_at = time.monotonic()
+                self.callback("press", 0)
+        elif message in (0x101, 0x105):
+            if self.active and key in self.keys and key in self.down:
+                self.consume_win_up = 0x5B in self.down
+                self.down.discard(key)
+                self.active = False
+                self.callback("release", (time.monotonic() - self.pressed_at) * 1000)
+            else:
+                self.down.discard(key)
+                if key in self.keys and not self.keys <= self.down:
+                    self.interrupted = False
+            if key == 0x5B and self.consume_win_up:
+                self.consume_win_up = False
+                # The physical Win-up is held back until the neutral key has been sent.
+                return consume_win_keyup(vk, scan)
+        return False
+
     def _run(self):
         HOOK = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
         class KBDLLHOOKSTRUCT(ctypes.Structure):
@@ -167,34 +222,8 @@ class Hotkey:
         def hook(code, message, pointer):
             if code >= 0:
                 event = ctypes.cast(pointer, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-                if not event.flags & 0x10:  # injected input
-                    key = {0xA2: 0x11, 0xA3: 0x11, 0x5C: 0x5B}.get(event.vkCode, event.vkCode)
-                    if message in (0x100, 0x104):
-                        self.down.add(key)
-                        if self.active and key not in self.keys:
-                            self.active = False
-                            self.interrupted = True
-                            self.callback("abort", 0)
-                        elif key in self.keys and not self.active and not self.interrupted and self.keys <= self.down:
-                            self.active = True
-                            self.pressed_at = time.monotonic()
-                            self.callback("press", 0)
-                    elif message in (0x101, 0x105):
-                        if self.active and key in self.keys and key in self.down:
-                            # F24 marks the Win chord as used before Windows handles key-up.
-                            if 0x5B in self.down:
-                                dummy = (INPUT * 2)()
-                                dummy[0].type = dummy[1].type = 1
-                                dummy[0].ki = KEYBDINPUT(0x87, 0, 0, 0, 0)
-                                dummy[1].ki = KEYBDINPUT(0x87, 0, 0x0002, 0, 0)
-                                user32.SendInput(2, ctypes.byref(dummy), ctypes.sizeof(INPUT))
-                            self.down.discard(key)
-                            self.active = False
-                            self.callback("release", (time.monotonic() - self.pressed_at) * 1000)
-                        else:
-                            self.down.discard(key)
-                            if key in self.keys and not self.keys <= self.down:
-                                self.interrupted = False
+                if self._on_key(event.vkCode, event.scanCode, event.flags, message):
+                    return 1
             return user32.CallNextHookEx(None, code, message, pointer)
 
         self._callback = HOOK(hook)

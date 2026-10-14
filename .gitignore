@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+.ruff_cache/
 *.gguf
 personal_terms.json
 personal_vocabulary.json

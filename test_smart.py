@@ -2,7 +2,7 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import nullcontext, redirect_stderr
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -58,21 +58,6 @@ class SmartTests(unittest.TestCase):
         cleaner.request.return_value["choices"][0]["finish_reason"] = "length"
         with self.assertRaises(ValueError):
             cleaner.clean("Hello", {})
-
-    def test_session_lifecycle(self):
-        with patch.object(smart, "SmartCleanup") as factory:
-            with smart.smart_session(False) as cleaner:
-                self.assertIsNone(cleaner)
-            factory.assert_not_called()
-            with self.assertRaises(KeyboardInterrupt):
-                with smart.smart_session(True):
-                    raise KeyboardInterrupt
-            factory.return_value.close.assert_called_once()
-        with patch.object(smart, "SmartCleanup") as factory, redirect_stderr(io.StringIO()):
-            factory.return_value.start.side_effect = OSError("missing")
-            with smart.smart_session(True) as cleaner:
-                self.assertIsNone(cleaner)
-            factory.return_value.close.assert_called_once()
 
     def test_repeated_shortcuts(self):
         with tempfile.TemporaryDirectory() as directory:

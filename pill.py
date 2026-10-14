@@ -2,17 +2,29 @@
 
 import argparse
 import ctypes
+import math
 import os
 import queue
+import struct
 import sys
 import threading
+import time
 import tkinter as tk
+import zlib
 from ctypes import wintypes
+from pathlib import Path
 
 from client import EngineClient
 
 
 TRANSPARENT = "#ff00ff"
+PILL_SIZES = {"idle": (40, 5), "recording": (78, 29), "locked": (94, 29),
+              "processing": (96, 28), "error": (128, 30)}
+HOVER_GROWTH = (6, 2)
+LOCK_ICON_SIZE = 20
+WAVE_PEAKS = (7, 11, 15, 18, 19, 20, 19, 17, 14, 10, 6)
+WAVE_PERIODS = (.75, .85, .68, .72, .82, .65, .78, .88, .70, .84, .76)
+WAVE_PHASES = (.12, .28, .05, .35, .18, .42, .22, .08, .32, .15, .26)
 user32 = ctypes.WinDLL("user32", use_last_error=True) if os.name == "nt" else None
 if user32:
     user32.GetParent.argtypes = [wintypes.HWND]
@@ -22,6 +34,7 @@ if user32:
     user32.MonitorFromWindow.restype = wintypes.HANDLE
     user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
     user32.GetDpiForWindow.argtypes = [wintypes.HWND]
+    user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
     user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                                    ctypes.c_int, ctypes.c_int, wintypes.UINT]
     user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
@@ -43,9 +56,41 @@ def pill_position(area, screen, width, height, margin):
     return x, y
 
 
+def pill_size(state, error=False):
+    return PILL_SIZES["error" if error else state]
+
+
+def capsule_png(width, height, shade, background):
+    """Rasterize a rounded capsule with subpixel edge coverage for Tk."""
+    radius = height / 2
+    pixels = bytearray()
+    for y in range(height):
+        row = bytearray()
+        for x in range(width):
+            dx = max(radius - (x + .5), 0, (x + .5) - (width - radius))
+            distance = math.hypot(dx, y + .5 - radius) - radius
+            coverage = max(0, min(1, .5 - distance))
+            if coverage:
+                # Tk's color key cannot blend partial alpha, so blend edge pixels here.
+                row.extend(round(shade * coverage + channel * (1 - coverage))
+                           for channel in background)
+                row.append(255)
+            else:
+                row.extend((0, 0, 0, 0))
+        pixels.append(0)
+        pixels.extend(row)
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    return (b"\x89PNG\r\n\x1a\n" +
+            chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(pixels)) + chunk(b"IEND", b""))
+
+
 class Pill:
     def __init__(self, smart=False, tap_threshold_ms=250, on_event=None, on_window_message=None,
-                 settings=None):
+                 settings=None, engine_job=None):
         if os.name != "nt":
             raise OSError("pill requires Windows")
         try:
@@ -59,10 +104,25 @@ class Pill:
         self.level = 0.0
         self.error = None
         self.error_serial = 0
+        self.visual_size = None
+        self.visual_target = None
+        self.animation_start = 0.0
+        self.animation_duration = .38
+        self.hover = False
+        self.in_tick = False
+        self.hover_amount = 0.0
+        self.hover_start = 0.0
+        self.hover_from = 0.0
+        self.lock_started = 0.0
+        self.display_level = 0.0
+        self.last_frame = time.monotonic()
         self.target = None
         self.ready = False
+        self.closing = False
+        self.toggle_pending = False
         self.on_event = on_event
         self.on_window_message = on_window_message
+        self.engine_job = engine_job
         previous_focus = user32.GetForegroundWindow()
         self.root = tk.Tk()
         self.root.withdraw()
@@ -70,20 +130,39 @@ class Pill:
         self.root.configure(bg=TRANSPARENT)
         self.root.wm_attributes("-transparentcolor", TRANSPARENT)
         self.canvas = tk.Canvas(self.root, bg=TRANSPARENT, highlightthickness=0, bd=0)
-        self.canvas.pack()
-        self.canvas.bind("<Button-1>", lambda _: self._send("toggle", insert=True))
+        self.canvas.pack(fill="both", expand=True)
+        self.canvas.bind("<ButtonRelease-1>", lambda _: self._click())
         self.canvas.bind("<Button-3>", lambda _: self._send("cancel"))
+        self.canvas.bind("<Enter>", lambda _: self._update_hover())
+        self.canvas.bind("<Motion>", lambda _: self._update_hover())
+        self.canvas.bind("<Leave>", lambda _: self.root.after(20, self._update_hover))
+        assets = Path(__file__).with_name("assets")
+        font_path = assets / "InterVariable.ttf"
+        gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
+        gdi32.AddFontResourceExW.argtypes = [ctypes.c_wchar_p, wintypes.DWORD, ctypes.c_void_p]
+        gdi32.GetPixel.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+        gdi32.GetPixel.restype = wintypes.COLORREF
+        user32.GetDC.argtypes = [wintypes.HWND]
+        user32.GetDC.restype = wintypes.HDC
+        user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+        self.gdi32 = gdi32
+        self.status_font = (("Inter Variable Text", 8, "bold")
+                            if font_path.is_file() and gdi32.AddFontResourceExW(str(font_path), 0x10, None)
+                            else ("Segoe UI", 8, "bold"))
+        self.lock_frames = [tk.PhotoImage(file=str(path))
+                            for path in sorted((assets / "lock_frames").glob("*.png"))]
+        self.capsule_images = {}
         self.root.update_idletasks()
         self.hwnd = user32.GetParent(self.root.winfo_id())
         if not self.hwnd:
             raise OSError("could not find pill window")
         self._install_window_style()
-        self._draw()
         self._place()
+        self._draw()
         user32.ShowWindow(self.hwnd, 4)  # SW_SHOWNOACTIVATE
         if previous_focus and user32.GetForegroundWindow() == self.hwnd:
             user32.SetForegroundWindow(previous_focus)
-        self.root.after(33, self._tick)
+        self.tick_after = self.root.after(33, self._tick)
         threading.Thread(target=self._connect, args=(smart, tap_threshold_ms, settings or {}), daemon=True).start()
 
     def _install_window_style(self):
@@ -127,52 +206,166 @@ class Pill:
         screen = info.rcMonitor
         dpi = user32.GetDpiForWindow(hwnd) or 96
         scale = dpi / 96
-        width, height = (62, 24) if self.state == "idle" and not self.error else (184, 48)
-        width, height = round(width * scale), round(height * scale)
-        margin = round(12 * scale)
+        target = pill_size(self.state, bool(self.error))
+        now = time.monotonic()
+        if self.visual_size is None:
+            self.visual_size = target
+        if target != self.visual_target:
+            self.animation_from = self.visual_size
+            self.visual_target = target
+            self.animation_start = now
+        progress = min(1.0, (now - self.animation_start) / self.animation_duration)
+        spring = 1 + 2.2 * (progress - 1) ** 3 + 1.2 * (progress - 1) ** 2
+        self.visual_size = tuple(min(limit, start + (end - start) * spring)
+                                 for start, end, limit in zip(
+                                     self.animation_from, target,
+                                     (max(size[0] for size in PILL_SIZES.values()),
+                                      max(size[1] for size in PILL_SIZES.values()))))
+        body_width, body_height = self.visual_size
+        if self.state == "idle" and not self.error:
+            body_width += HOVER_GROWTH[0] * self.hover_amount
+            body_height += HOVER_GROWTH[1] * self.hover_amount
+        width = round(max(size[0] for size in PILL_SIZES.values()) * scale)
+        height = round(max(size[1] for size in PILL_SIZES.values()) * scale)
+        body_width, body_height = round(body_width * scale), round(body_height * scale)
+        body = ((width - body_width) // 2, height - body_height,
+                body_width, body_height)
+        margin = round(14 * scale)
         x, y = pill_position(area, screen, width, height, margin)
-        if getattr(self, "size", None) != (width, height):
-            self.canvas.configure(width=width, height=height)
         geometry = (x, y, width, height)
+        changed = body != getattr(self, "body", None) or geometry != getattr(self, "geometry", None)
         if geometry != getattr(self, "geometry", None):
-            user32.SetWindowPos(self.hwnd, -1, *geometry, 0x0010 | 0x0040)
+            # Keep the canvas at one size across state changes. A shrinking
+            # layered Tk window can retain a clipped frame of the old waveform.
+            self.root.geometry(f"{width}x{height}")
+            self.root.update_idletasks()
+            if not user32.SetWindowPos(self.hwnd, -1, *geometry, 0x0010 | 0x0040):
+                raise ctypes.WinError(ctypes.get_last_error())
             self.geometry = geometry
         self.size = width, height
+        self.body = body
+        return changed
 
     def _draw(self):
-        if not hasattr(self, "size"):
-            self.size = 62, 24
-        width, height = self.size
-        self.canvas.delete("all")
-        radius = height / 2
-        self.canvas.create_oval(0, 0, height, height, fill="black", outline="black")
-        self.canvas.create_oval(width - height, 0, width, height, fill="black", outline="black")
-        self.canvas.create_rectangle(radius, 0, width - radius, height, fill="black", outline="black")
+        left, top, width, height = self.body
+        if not hasattr(self, "shapes"):
+            self.shapes = {
+                "capsule": self.canvas.create_image(0, 0, anchor="nw"),
+                "text": self.canvas.create_text(0, 0, state="hidden", font=self.status_font),
+                "lock_arc": self.canvas.create_arc(0, 0, 0, 0, start=0, extent=180,
+                                                    outline="white", width=2, style="arc", state="hidden"),
+                "lock_body": self.canvas.create_rectangle(0, 0, 0, 0, fill="white",
+                                                           outline="white", state="hidden"),
+                "lock_image": self.canvas.create_image(0, 0, state="hidden"),
+            }
+            self.bars = [self.canvas.create_line(0, 0, 0, 0, fill="white", capstyle="round",
+                                                 state="hidden") for _ in WAVE_PEAKS]
+        logical_width = self.visual_size[0]
+        shade = (round(85 - 22 * max(0, min(1, (logical_width - 40) / 4)))
+                 if logical_width <= 44 else
+                 round(63 * max(0, min(1, (78 - logical_width) / 34))))
+        if self.state == "idle" and not self.error:
+            shade = max(0, shade - round(22 * self.hover_amount))
+        dc = user32.GetDC(None)
+        try:
+            pixel = self.gdi32.GetPixel(dc, self.geometry[0] + left + width // 2,
+                                        self.geometry[1] + top - 2)
+        finally:
+            user32.ReleaseDC(None, dc)
+        background = ((pixel & 255, (pixel >> 8) & 255, (pixel >> 16) & 255)
+                      if pixel != 0xFFFFFFFF else (32, 32, 32))
+        key = width, height, shade, background
+        if key not in self.capsule_images:
+            if len(self.capsule_images) >= 128:
+                self.capsule_images.clear()
+            self.capsule_images[key] = tk.PhotoImage(data=capsule_png(*key), format="png")
+        self.canvas.coords(self.shapes["capsule"], left, top)
+        self.canvas.itemconfigure(self.shapes["capsule"], image=self.capsule_images[key])
+        label = None
+        label_color = "white"
         if self.error:
-            label = "Insertion failed" if "Text insertion failed" in self.error else self.error[:20]
-            self.canvas.create_text(width / 2, height / 2, text=label,
-                                    fill="#ff7777", font=("Segoe UI", max(9, height // 4)))
-        elif self.state == "idle":
-            self.canvas.create_oval(width / 2 - 2, height / 2 - 2,
-                                    width / 2 + 2, height / 2 + 2, fill="white", outline="")
+            label = ("Insert failed" if "Text insertion failed" in self.error else
+                     "Mic error" if "microphone" in self.error.lower() else "Error")
+            label_color = "#ff7777"
         elif self.state == "processing":
-            self.canvas.create_text(width / 2, height / 2,
-                                    text="Processing…" if self.ready else "Starting…", fill="white",
-                                    font=("Segoe UI", max(9, height // 4)))
-        else:
-            bars = 11
-            gap = width / (bars + 5)
-            for index in range(bars):
-                variation = abs((index * 7) % 11 - 5) / 5
-                amplitude = max(0.1, min(1, self.level * 4 + 0.12))
-                length = max(5, (height - 15) * amplitude * (0.4 + 0.6 * variation))
-                x = width / 2 + (index - (bars - 1) / 2) * gap
-                self.canvas.create_line(x, (height - length) / 2, x, (height + length) / 2,
-                                        fill="white", width=max(2, round(height / 16)), capstyle="round")
+            label = "Working…" if self.ready else "Starting…"
+        self.canvas.itemconfigure(self.shapes["text"], text=label or "", fill=label_color,
+                                  state="normal" if label and width >= 75 else "hidden")
+        self.canvas.coords(self.shapes["text"], left + width / 2, top + height / 2)
+        locked = self.state == "locked" and not self.error
+        for shape in ("lock_arc", "lock_body"):
+            self.canvas.itemconfigure(self.shapes[shape],
+                                      state="normal" if locked and not self.lock_frames else "hidden")
+        self.canvas.itemconfigure(self.shapes["lock_image"],
+                                  state="normal" if locked and self.lock_frames else "hidden")
+        if locked and self.lock_frames:
+            frame = min(len(self.lock_frames) - 1,
+                        int((time.monotonic() - self.lock_started) * 30))
+            self.canvas.itemconfigure(self.shapes["lock_image"], image=self.lock_frames[max(0, frame)])
+            self.canvas.coords(self.shapes["lock_image"],
+                               left + LOCK_ICON_SIZE * height / self.visual_size[1],
+                               top + height / 2)
+        elif locked:
+            lock_left = left + height * 0.42
+            self.canvas.coords(self.shapes["lock_arc"], lock_left, top + height * 0.25,
+                               lock_left + height * 0.25, top + height * 0.65)
+            self.canvas.coords(self.shapes["lock_body"], lock_left, top + height * 0.47,
+                               lock_left + height * 0.25, top + height * 0.72)
+        active = self.state in ("recording", "locked") and not self.error
+        for bar in self.bars:
+            self.canvas.itemconfigure(bar, state="normal" if active else "hidden")
+        if active:
+            activity = max(0.12, min(1, self.display_level * 4))
+            now = time.monotonic()
+            scale = height / self.visual_size[1]
+            gap = min(4.5 * scale, max(1.5 * scale, (width - 14 * scale) / 10))
+            for index, (bar, peak) in enumerate(zip(self.bars, WAVE_PEAKS)):
+                bounce = (1 - math.cos(2 * math.pi * (now + WAVE_PHASES[index]) /
+                                       WAVE_PERIODS[index])) / 2
+                length = min((4 + (peak - 4) * activity * (0.35 + 0.65 * bounce)) * scale,
+                             max(1, height - 4 * scale))
+                x = left + width / 2 + (index - 5) * gap + (12 * scale if locked else 0)
+                self.canvas.coords(bar, x, top + (height - length) / 2,
+                                   x, top + (height + length) / 2)
+                self.canvas.itemconfigure(bar, width=max(2, round(2 * scale)))
 
     def _send(self, name, **args):
         if self.ready and self.state != "processing":
             self.commands.put((name, args, None))
+
+    def _set_hover(self, hovered):
+        if hovered != self.hover:
+            self.hover = hovered
+            self.hover_from = self.hover_amount
+            self.hover_start = time.monotonic()
+            if not self.in_tick:
+                self.root.after_cancel(self.tick_after)
+                self.tick_after = self.root.after(16, self._tick)
+
+    def _cursor_position(self):
+        point = wintypes.POINT()
+        rect = wintypes.RECT()
+        user32.GetCursorPos(ctypes.byref(point))
+        user32.GetWindowRect(self.hwnd, ctypes.byref(rect))
+        return point.x - rect.left, point.y - rect.top
+
+    def _update_hover(self):
+        if self.state != "idle" or self.error:
+            self._set_hover(False)
+            return
+        x, y = self._cursor_position()
+        scale = self.size[0] / max(size[0] for size in PILL_SIZES.values())
+        width, height = round(40 * scale), round(5 * scale)
+        left, top = (self.size[0] - width) // 2, self.size[1] - height
+        margin = round((14 if self.hover else 7) * scale)
+        self._set_hover(left - margin <= x <= left + width + margin and
+                        top - margin <= y <= top + height + margin)
+
+    def _click(self):
+        if self.toggle_pending or not self.ready or self.state == "processing":
+            return
+        self.toggle_pending = True
+        self._send("toggle", insert=True)
 
     def request(self, name, callback=None, **args):
         if self.ready:
@@ -184,7 +377,7 @@ class Pill:
     def _connect(self, smart, threshold, settings):
         commands = events = None
         try:
-            commands = EngineClient(start=True)
+            commands = EngineClient(start=True, job=self.engine_job)
             commands.command("settings", mode="hybrid", smart=smart,
                              tap_threshold_ms=threshold, hotkey=True, **settings)
             events = EngineClient()
@@ -195,10 +388,11 @@ class Pill:
             self.command_worker.start()
             for event in events.events():
                 self.messages.put(event)
-            if self.ready:
+            if self.ready and not self.closing:
                 self.messages.put({"event": "error", "message": "Engine connection lost"})
         except Exception as exc:
-            self.messages.put({"event": "error", "message": str(exc)})
+            if not self.closing:
+                self.messages.put({"event": "error", "message": str(exc)})
         finally:
             self.ready = False
             if commands and not hasattr(self, "command_worker"):
@@ -234,6 +428,9 @@ class Pill:
             client.close()
 
     def _tick(self):
+        self.in_tick = True
+        if self.state == "idle" or self.hover:
+            self._update_hover()
         redraw = False
         while True:
             try:
@@ -241,33 +438,67 @@ class Pill:
             except queue.Empty:
                 break
             if event["event"] == "state":
+                self.toggle_pending = False
+                if event["value"] == "locked" and self.state != "locked":
+                    self.lock_started = time.monotonic()
                 self.state = event["value"]
                 if self.state in ("recording", "locked") and self.target is None:
                     self.target = user32.GetForegroundWindow()
                 elif self.state == "idle":
                     self.target = None
+                    self.level = 0.0
                 redraw = True
             elif event["event"] == "level":
                 self.level = event["value"]
                 redraw = self.state in ("recording", "locked")
             elif event["event"] == "error":
+                self.toggle_pending = False
                 self.error = event["message"]
-                print(self.error, file=sys.stderr)
+                if not self.closing:
+                    print(self.error, file=sys.stderr)
                 self.error_serial += 1
                 if self.ready:
                     self.root.after(3500, self._clear_error, self.error_serial)
                 redraw = True
             elif event["event"] == "response":
-                event["callback"](event.get("result"), event.get("error"))
+                redraw = not self._dispatch_ui_callback(
+                    event["callback"], event.get("result"), event.get("error")) or redraw
             if self.on_event and event["event"] != "response":
-                self.on_event(event)
-        if redraw or not hasattr(self, "positioned"):
-            self._place()
+                redraw = not self._dispatch_ui_callback(self.on_event, event) or redraw
+        now = time.monotonic()
+        hover_progress = min(1.0, (now - self.hover_start) / .2)
+        hover_target = 1.0 if self.hover else 0.0
+        hover_amount = self.hover_from + (hover_target - self.hover_from) * (
+            1 - (1 - hover_progress) ** 3)
+        redraw = redraw or abs(hover_amount - self.hover_amount) > .001
+        self.hover_amount = hover_amount
+        changed = self._place()
+        elapsed = min(.25, now - self.last_frame)
+        self.last_frame = now
+        level = self.level if self.state in ("recording", "locked") else 0.0
+        response = .06 if level > self.display_level else .14
+        self.display_level += (level - self.display_level) * (1 - math.exp(-elapsed / response))
+        redraw = redraw or self.state in ("recording", "locked")
+        if redraw or changed or not hasattr(self, "positioned"):
             self._draw()
-        else:
-            self._place()
         self.positioned = True
-        self.root.after(33 if self.state in ("recording", "locked") else 250, self._tick)
+        animating = now - self.animation_start < self.animation_duration
+        hover_animating = hover_progress < 1 and self.hover_from != hover_target
+        self.in_tick = False
+        self.tick_after = self.root.after(
+            16 if self.state in ("recording", "locked") or animating or hover_animating else
+            33 if self.state == "processing" or self.hover else 80, self._tick)
+
+    def _dispatch_ui_callback(self, callback, *args):
+        try:
+            callback(*args)
+            return True
+        except Exception:
+            self.root.report_callback_exception(*sys.exc_info())
+            self.error = "UI update failed; see ui.log"
+            self.error_serial += 1
+            self.root.after(3500, self._clear_error, self.error_serial)
+            return False
 
     def _clear_error(self, serial):
         if serial != self.error_serial:

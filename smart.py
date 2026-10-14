@@ -7,7 +7,6 @@ import subprocess
 import sys
 import time
 from collections import Counter
-from contextlib import contextmanager
 from pathlib import Path
 from urllib.request import Request, build_opener, ProxyHandler
 
@@ -209,21 +208,3 @@ class SmartCleanup:
         if choice["finish_reason"] != "stop":
             raise ValueError("incomplete cleanup")
         return validate_output(choice["message"]["content"], values, json_mode)
-
-
-@contextmanager
-def smart_session(enabled):
-    cleaner = SmartCleanup() if enabled else None
-    try:
-        if cleaner:
-            print("Loading smart cleanup...", flush=True)
-            try:
-                cleaner.start()
-            except (OSError, ValueError) as exc:
-                cleaner.close()
-                cleaner = None
-                print(f"Smart cleanup unavailable: {exc}.", file=sys.stderr)
-        yield cleaner
-    finally:
-        if cleaner:
-            cleaner.close()

@@ -26,14 +26,15 @@ import stt
 from vocabulary import apply_vocabulary
 from windows_support import ChildJob, Hotkey, foreground_app, foreground_window, insert_text
 from ipc_protocol import APP_DIR, ENDPOINT
-from user_data import (dictionary_get, dictionary_set, history_append, history_audio,
-                       history_change, history_list)
+from user_data import (dictionary_get, dictionary_set, history_append,
+                       history_change, history_compact, history_list)
 from vocabulary import VOCABULARY
 
 
 LOG = APP_DIR / "engine.log"
 SAMPLE_RATE = 16000
 IDLE_UNLOAD = 300
+ASR_IDLE_UNLOAD = 20
 
 
 def wav_bytes(pcm, rate=SAMPLE_RATE):
@@ -147,15 +148,14 @@ class DictationEngine:
     def __init__(self, asr=None, capture=True, hotkey=False):
         if asr is None:
             from model_manager import ensure_asr
-            try:
-                self.asr = ParakeetLibraryASR(ensure_asr())
-            except (OSError, ValueError) as exc:
-                if not (stt.RUNTIME / "redux-q8_0.gguf").is_file():
-                    raise
-                logging.warning("Parakeet library unavailable, using CLI: %s", exc)
-                self.asr = ParakeetASR()
+            self.asr_library = ensure_asr()
+            self.asr = None
         else:
+            self.asr_library = None
             self.asr = asr
+        self.asr_future = None
+        self.asr_used = time.monotonic()
+        self.asr_jobs = set()
         self.lock = threading.RLock()
         self.state = "idle"
         self.mode = "hold"
@@ -167,7 +167,6 @@ class DictationEngine:
         self.cleaner_used = 0
         self.pending = []
         self.segment = []
-        self.audio_chunks = []
         self.level = 0.0
         self.noise = 100.0
         self.quiet_frames = 0
@@ -177,6 +176,8 @@ class DictationEngine:
         self.pre_roll = deque(maxlen=15)
         self.executor = ThreadPoolExecutor(max_workers=2)
         self.listeners = set()
+        self.stopping = threading.Event()
+        self.level_wakeup = threading.Event()
         self.stream = None
         self.rate = SAMPLE_RATE
         self.capture_rate = SAMPLE_RATE
@@ -188,7 +189,7 @@ class DictationEngine:
         self.insert = False
         self.replaying = False
         self.record_history = True
-        self.job = ChildJob()
+        self.job = None if os.getenv("STT_ENGINE_PARENT_JOB") == "1" else ChildJob()
         if capture:
             self._start_capture()
         self.hotkey = None
@@ -228,7 +229,6 @@ class DictationEngine:
             self.level = min(1.0, level / 10000)
             if self.state in ("recording", "locked") and not self.replaying:
                 self.segment.append(chunk)
-                self.audio_chunks.append(chunk)
                 threshold = max(250, self.noise * 3)
                 voice = self.vad.is_speech(chunk, self.rate) and level >= threshold if self.rate == 16000 else level >= threshold
                 self.speech_run = self.speech_run + 1 if voice else 0
@@ -236,7 +236,7 @@ class DictationEngine:
                 self.quiet_frames = 0 if voice else self.quiet_frames + 1
                 if self.quiet_frames >= 30 and len(self.segment) >= 200 and self.max_speech_run >= 8:
                     payload = b"".join(self.segment)
-                    self.pending.append(self.executor.submit(self._asr, payload, self.rate))
+                    self.pending.append(self._submit_asr(payload, self.rate))
                     self.segment.clear()
                     self.quiet_frames = 0
                     self.speech_run = 0
@@ -246,10 +246,12 @@ class DictationEngine:
                 self.pre_roll.append(chunk)
 
     def _level_loop(self):
-        while True:
-            time.sleep(1 / 30)
+        while not self.stopping.is_set():
+            self.level_wakeup.clear()
             if self.listeners:
                 self.emit("level", {"value": self.level})
+            # Idle heartbeats keep subscribed sockets alive without a 30 Hz UI wakeup.
+            self.level_wakeup.wait(1 / 30 if self.state in ("recording", "locked") else 5)
 
     def emit(self, kind, data):
         event = {"event": kind, **data}
@@ -264,12 +266,31 @@ class DictationEngine:
 
     def _asr(self, pcm, rate):
         start = time.perf_counter()
-        text = self.asr.transcribe(pcm, rate)
+        asr = self.asr_future.result() if self.asr_future else self.asr
+        text = asr.transcribe(pcm, rate)
         return text, round((time.perf_counter() - start) * 1000, 1)
+
+    def _submit_asr(self, pcm, rate):
+        future = self.executor.submit(self._asr, pcm, rate)
+        self.asr_jobs.add(future)
+        return future
+
+    def _load_asr(self):
+        try:
+            return ParakeetLibraryASR(self.asr_library)
+        except (OSError, ValueError) as exc:
+            logging.warning("Parakeet library unavailable, using CLI: %s", exc)
+            return ParakeetASR()
+
+    def _warm_asr(self):
+        self.asr_used = time.monotonic()
+        if self.asr_library and self.asr_future is None:
+            self.asr_future = self.executor.submit(self._load_asr)
 
     def _state(self, value):
         self.state = value
         self.emit("state", {"value": value, "mode": self.mode})
+        self.level_wakeup.set()
 
     def _hotkey(self, action, held_ms):
         if self.hotkey_enabled:
@@ -277,8 +298,13 @@ class DictationEngine:
 
     def _hotkey_loop(self):
         while True:
-            action, held_ms = self.hotkey_events.get()
+            event = self.hotkey_events.get()
             try:
+                if event is None:
+                    return
+                if self.stopping.is_set():
+                    continue
+                action, held_ms = event
                 if action == "abort":
                     self.hotkey_pending_finish = False
                     if self.hotkey_recording and self.state == "recording":
@@ -329,12 +355,22 @@ class DictationEngine:
         self.cleaner_used = time.monotonic()
 
     def _idle_loop(self):
-        while True:
-            time.sleep(5)
+        while not self.stopping.wait(5):
             with self.lock:
+                self._unload_idle_asr()
                 if self.cleaner and self.state == "idle" and time.monotonic() - self.cleaner_used > IDLE_UNLOAD:
                     self.cleaner.close()
                     self.cleaner = None
+
+    def _unload_idle_asr(self):
+        self.asr_jobs = {job for job in self.asr_jobs if not job.done()}
+        if (self.asr_library and self.state == "idle" and self.asr_future and
+                self.asr_future.done() and not self.asr_jobs and
+                time.monotonic() - self.asr_used > ASR_IDLE_UNLOAD):
+            asr = self.asr_future.result()
+            if hasattr(asr, "close"):
+                asr.close()
+            self.asr_future = None
 
     def command(self, name, args):
         with self.lock:
@@ -342,7 +378,9 @@ class DictationEngine:
                 return {"state": self.state, "mode": self.mode, "level": self.level,
                         "tap_threshold_ms": self.tap_threshold_ms, "hotkey": self.hotkey_enabled,
                         "smart_ready": self.cleaner is not None, "sample_rate": self.rate,
-                        "asr_backend": type(self.asr).__name__, "capture_ready": self.stream is not None,
+                        "asr_backend": (type(self.asr_future.result()).__name__ if self.asr_future and
+                                        self.asr_future.done() else "Parakeet (unloaded)" if self.asr_library else
+                                        type(self.asr).__name__), "capture_ready": self.stream is not None,
                         "smart": self.smart_enabled, "tier": self.tier, "microphone": self.microphone,
                         "language": self.language}
             if name == "devices":
@@ -361,25 +399,7 @@ class DictationEngine:
             if name == "history_list":
                 return history_list(stt.HISTORY_DIR, args.get("limit", 100), args.get("offset", 0))
             if name == "history_change":
-                action = args.get("action")
-                if action == "retry":
-                    if self.state != "idle":
-                        raise ValueError("retry requires idle state")
-                    entry = next((row for row in history_list(stt.HISTORY_DIR, 500)
-                                  if row["id"] == args.get("id")), None)
-                    if entry is None:
-                        raise ValueError("history entry not found")
-                    raw = entry["raw"]
-                    text = stt.format_transcript(raw)
-                    if args.get("smart", self.smart_enabled) and cleanup_needed(raw):
-                        self._ensure_cleaner()
-                        candidate = stt.format_transcript(raw, self.cleaner)
-                        if meaning_guard(text, candidate):
-                            text = candidate
-                    return history_change(stt.HISTORY_DIR, entry["id"], "retry", text)
-                return history_change(stt.HISTORY_DIR, args.get("id"), action)
-            if name == "history_audio":
-                return history_audio(stt.HISTORY_DIR, args.get("id"))
+                return history_change(stt.HISTORY_DIR, args.get("id"), args.get("action"))
             if name == "settings":
                 if self.state != "idle":
                     if args != {"hotkey": False}:
@@ -445,10 +465,10 @@ class DictationEngine:
                     raise ValueError("engine is busy")
                 if self.stream is None:
                     self._start_capture()
+                self._warm_asr()
                 self.rate = self.capture_rate
                 self.replaying = False
                 self.segment = list(self.pre_roll)
-                self.audio_chunks = list(self.pre_roll)
                 self.pending = []
                 self.speech_run = self.max_speech_run = self.quiet_frames = 0
                 self.start_time = time.perf_counter()
@@ -473,7 +493,6 @@ class DictationEngine:
                 if self.state not in ("recording", "locked"):
                     raise ValueError("nothing to cancel")
                 self.segment.clear()
-                self.audio_chunks.clear()
                 self.replaying = False
                 self._state("idle")
                 return {"state": self.state}
@@ -486,9 +505,9 @@ class DictationEngine:
                         raise ValueError("WAV must be mono 16-bit PCM")
                     payload, rate = wav.readframes(wav.getnframes()), wav.getframerate()
                 self.rate = rate
+                self._warm_asr()
                 self.replaying = True
                 self.segment = [payload]
-                self.audio_chunks = [payload]
                 self.pending = []
                 self.start_time = time.perf_counter()
                 self.foreground = foreground_app()
@@ -507,18 +526,16 @@ class DictationEngine:
         tail = b"".join(self.segment)
         futures = list(self.pending)
         if tail:
-            futures.append(self.executor.submit(self._asr, tail, self.rate))
+            futures.append(self._submit_asr(tail, self.rate))
         if not futures:
             raise ValueError("no audio recorded")
         release_at = time.perf_counter()
-        audio_chunks = self.audio_chunks
-        self.audio_chunks = []
         self.recording_ms = round((release_at - self.start_time) * 1000, 1)
         self._state("processing")
-        threading.Thread(target=self._process, args=(futures, release_at, audio_chunks), daemon=True).start()
+        threading.Thread(target=self._process, args=(futures, release_at), daemon=True).start()
         return {"state": "processing"}
 
-    def _process(self, futures, release_at, audio_chunks):
+    def _process(self, futures, release_at):
         timings = {}
         error = lambda message: self.emit("error", {"message": message})
         try:
@@ -562,9 +579,7 @@ class DictationEngine:
             if self.record_history:
                 try:
                     record = history_append(stt.HISTORY_DIR,
-                                            {"text": final, "raw": raw, "plain": plain, "cleaned": final,
-                                             "timings": timings, "app": self.foreground, "mode": self.mode},
-                                            wav_bytes(b"".join(audio_chunks), self.rate) if audio_chunks else None)
+                                            {"text": final, "app": (self.foreground or {}).get("process", "")})
                     if record:
                         self.emit("history_added", {"id": record["id"]})
                 except OSError as exc:
@@ -577,9 +592,14 @@ class DictationEngine:
                 self.segment.clear()
                 self.pending.clear()
                 self.replaying = False
+                self.asr_used = time.monotonic()
                 self._state("idle")
 
     def close(self):
+        self.hotkey_enabled = False
+        self.stopping.set()
+        self.level_wakeup.set()
+        self.hotkey_events.put(None)
         with self.lock:
             if self.stream:
                 self.stream.stop()
@@ -587,9 +607,11 @@ class DictationEngine:
             if self.cleaner:
                 self.cleaner.close()
             self.executor.shutdown(wait=True, cancel_futures=True)
-            if hasattr(self.asr, "close"):
-                self.asr.close()
-            self.job.close()
+            asr = self.asr_future.result() if self.asr_future else self.asr
+            if hasattr(asr, "close"):
+                asr.close()
+            if self.job:
+                self.job.close()
 
 
 class IPCHandler(socketserver.StreamRequestHandler):
@@ -643,6 +665,10 @@ def serve(capture=True, hotkey=False):
             raise RuntimeError("engine is already running") from exc
     logging.basicConfig(filename=LOG, level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
+    try:
+        history_compact(stt.HISTORY_DIR)
+    except (OSError, ValueError):
+        logging.exception("history compaction failed")
     try:
         engine = DictationEngine(capture=capture, hotkey=hotkey)
     except Exception:

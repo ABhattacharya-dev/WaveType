@@ -1,6 +1,7 @@
 """Minimal JSON-lines client for the local engine."""
 
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -12,18 +13,28 @@ from ipc_protocol import ENDPOINT
 
 
 class EngineClient:
-    def __init__(self, start=False, no_mic=False):
+    def __init__(self, start=False, no_mic=False, job=None):
         if start and not self._reachable():
-            flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             executable = (Path(sys.executable).parent / "engine" / "STTEngine.exe"
                           if getattr(sys, "frozen", False) else None)
             command = ([str(executable), "serve"] if executable else
                        [sys.executable, str(Path(__file__).with_name("engine.py")), "serve"])
             if executable and not executable.is_file():
                 raise FileNotFoundError(f"bundled engine is missing: {executable}")
+            environment = os.environ.copy()
+            if job:
+                environment["STT_ENGINE_PARENT_JOB"] = "1"
             process = subprocess.Popen([*command, *(["--no-mic"] if no_mic else [])], stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             creationflags=flags, close_fds=True)
+                             creationflags=flags, close_fds=True, env=environment)
+            if job:
+                try:
+                    job.assign(process.pid)
+                except Exception:
+                    process.terminate()
+                    process.wait()
+                    raise
             deadline = time.monotonic() + 3600
             while time.monotonic() < deadline and not self._reachable():
                 if process.poll() is not None:
@@ -73,8 +84,12 @@ class EngineClient:
                 yield event
 
     def close(self):
-        self.file.close()
-        self.sock.close()
+        try:
+            self.file.close()
+        except OSError:
+            pass  # The server may already have closed the connection during Exit.
+        finally:
+            self.sock.close()
 
 
 if __name__ == "__main__":

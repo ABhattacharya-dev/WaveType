@@ -12,7 +12,13 @@ if (-not (Test-Path -LiteralPath $pyinstaller)) { throw 'Install PyInstaller in 
     --add-binary 'runtime\parakeet-cli.exe;runtime' engine.py
 if ($LASTEXITCODE -ne 0) { throw 'Engine bundle failed.' }
 
-& $pyinstaller --noconfirm --clean --onedir --windowed --name STTCore desktop.py
+& $pyinstaller --noconfirm --clean --onedir --windowed --name STTCore `
+    --add-data 'assets\InterVariable.ttf;assets' `
+    --add-data 'assets\Figtree.ttf;assets' `
+    --add-data 'assets\EBGaramond.ttf;assets' `
+    --add-data 'assets\JetBrainsMono.ttf;assets' `
+    --add-data 'assets\icons;assets\icons' `
+    --add-data 'assets\lock_frames;assets\lock_frames' desktop.py
 if ($LASTEXITCODE -ne 0) { throw 'UI bundle failed.' }
 
 $bundle = (Resolve-Path -LiteralPath (Join-Path $project 'dist\STTCore')).Path
