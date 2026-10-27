@@ -134,7 +134,7 @@ If WaveType helps you, [star the repository](https://github.com/ABhattacharya-de
 
 ### Community files being added
 
-The Code of Conduct, Contributing guide, project-code license, and Security Policy are available now. The remaining templates will be linked as they are added.
+The Code of Conduct, Contributing guide, project-code license, Security Policy, and issue forms are available now. The pull request template will be linked when added.
 
 | Item | Document or path | Status |
 | --- | --- | --- |
@@ -142,7 +142,7 @@ The Code of Conduct, Contributing guide, project-code license, and Security Poli
 | Contribution guide | [Read the Contributing guide](CONTRIBUTING.md) | Added |
 | Project-code license | [MIT License](LICENSE) | Added |
 | Security policy | [Read the Security Policy](SECURITY.md) | Added |
-| Issue templates | `.github/ISSUE_TEMPLATE/` | To add |
+| Issue templates | [Bug report](.github/ISSUE_TEMPLATE/01-bug-report.yml) · [Feature request](.github/ISSUE_TEMPLATE/02-feature-request.yml) | Added |
 | Pull request template | `.github/PULL_REQUEST_TEMPLATE.md` | To add |
 
 ## License and credits

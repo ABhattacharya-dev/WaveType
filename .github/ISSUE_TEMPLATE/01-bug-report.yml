@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a reproducible problem with WaveType.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. For vulnerabilities, follow the [Security Policy](https://github.com/ABhattacharya-dev/WaveType/blob/main/SECURITY.md) and report privately.
+        Remove dictated text, tokens, personal paths, and other private data from anything you share.
+  - type: input
+    id: version
+    attributes:
+      label: WaveType version or commit
+      placeholder: "v0.1.0-beta.1 or a commit hash"
+    validations:
+      required: true
+  - type: dropdown
+    id: how-run
+    attributes:
+      label: How did you run WaveType?
+      options:
+        - Windows installer
+        - Desktop app from source
+        - Terminal client
+        - Standalone pill
+        - Other or not sure
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 23H2, x64"
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: CPU and GPU, if relevant
+      placeholder: "Ryzen 7 4800H; GTX 1650"
+  - type: dropdown
+    id: smart-cleanup
+    attributes:
+      label: Was Smart cleanup enabled?
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: first-run
+    attributes:
+      label: Was this the first run or model download?
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use numbered steps if possible.
+      placeholder: |
+        1. Open WaveType...
+        2. Select a text box...
+        3. Press Ctrl+Win...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted logs or screenshots
+      description: Optional. Remove personal speech, contact details, tokens, and private file paths before attaching anything.

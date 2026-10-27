@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an improvement to WaveType.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues before suggesting a feature. Please describe the need and expected behavior; avoid including private recordings or personal data.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Dictation and hotkeys
+        - Transcription
+        - Smart cleanup
+        - Desktop UI and accessibility
+        - Installer and updates
+        - Privacy and data
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation and who it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What behavior would you like?
+      description: A short example is useful.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: Optional. Tell us what you have tried.
