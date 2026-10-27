@@ -38,9 +38,9 @@ VIAddVersionKey "LegalCopyright" "WaveType contributors"
 !define MUI_WELCOMEPAGE_TITLE "Welcome to WaveType"
 !define MUI_WELCOMEPAGE_TEXT "Dictate into your favorite Windows apps with Ctrl + Win.$\r$\n$\r$\nSpeech recognition and optional Smart cleanup run on this computer. Setup downloads and verifies the speech model and runtime; an internet connection and several GB of free space are needed.$\r$\n$\r$\nWaveType installs for your account without administrator access."
 !insertmacro MUI_PAGE_WELCOME
-!define MUI_PAGE_HEADER_TEXT "Privacy and third-party notices"
+!define MUI_PAGE_HEADER_TEXT "Privacy and license notices"
 !define MUI_PAGE_HEADER_SUBTEXT "Review local data handling and bundled components."
-!define MUI_LICENSEPAGE_TEXT_TOP "WaveType keeps speech processing local. These are privacy and third-party notices."
+!define MUI_LICENSEPAGE_TEXT_TOP "WaveType keeps speech processing local. Review privacy and license notices."
 !define MUI_LICENSEPAGE_BUTTON "Next >"
 !insertmacro MUI_PAGE_LICENSE "packaging\INSTALL-NOTICES.txt"
 Page custom OptionsCreate OptionsLeave

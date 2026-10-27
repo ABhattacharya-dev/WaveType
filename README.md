@@ -6,7 +6,7 @@ Speak naturally. Type anywhere. Keep your dictation on your Windows PC.
 
 WaveType is a local dictation app for Windows 10 and 11. A floating pill and a **Ctrl+Win** shortcut turn speech into text with Parakeet Redux; optional Qwen Smart cleanup can polish the result before insertion. After the first model downloads, inference runs offline.
 
-[![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&logoColor=white)](#download-and-install) [![Latest release](https://img.shields.io/github/v/release/ABhattacharya-dev/WaveType?include_prereleases&label=release)](https://github.com/ABhattacharya-dev/WaveType/releases) [![GitHub issues](https://img.shields.io/github/issues/ABhattacharya-dev/WaveType)](https://github.com/ABhattacharya-dev/WaveType/issues)
+[![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&logoColor=white)](#download-and-install) [![Latest release](https://img.shields.io/github/v/release/ABhattacharya-dev/WaveType?include_prereleases&label=release)](https://github.com/ABhattacharya-dev/WaveType/releases) [![GitHub issues](https://img.shields.io/github/issues/ABhattacharya-dev/WaveType)](https://github.com/ABhattacharya-dev/WaveType/issues) [![License: MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 
 [Download the Windows preview](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta.1) · [See how it works](#how-to-dictate) · [Contribute](#contributing)
 
@@ -132,17 +132,17 @@ If WaveType helps you, [star the repository](https://github.com/ABhattacharya-de
 
 ### Community files being added
 
-The Code of Conduct and Contributing guide are available now. The other documents and templates below will be linked as they are added.
+The Code of Conduct, Contributing guide, and project-code license are available now. The remaining documents and templates will be linked as they are added.
 
 | Item | Document or path | Status |
 | --- | --- | --- |
 | Code of conduct | [Read the Code of Conduct](CODE_OF_CONDUCT.md) | Added |
 | Contribution guide | [Read the Contributing guide](CONTRIBUTING.md) | Added |
-| Project-code license | `LICENSE` | To choose and add |
+| Project-code license | [MIT License](LICENSE) | Added |
 | Security policy | `SECURITY.md` | To add |
 | Issue templates | `.github/ISSUE_TEMPLATE/` | To add |
 | Pull request template | `.github/PULL_REQUEST_TEMPLATE.md` | To add |
 
 ## License and credits
 
-The repository currently has **no declared license for its project code**. See [third-party notices](LICENSES.md) for the Parakeet, Qwen, llama.cpp, parakeet.cpp, font, and icon assets and their separate terms. A project-code license needs to be selected before describing WaveType as licensed open source.
+WaveType project code is licensed under the [MIT License](LICENSE). Third-party models, runtimes, fonts, and artwork retain their own terms; see [third-party notices](LICENSES.md). The published beta 1 installer predates this license update; future installer builds include the project license text.

@@ -2,7 +2,7 @@
 
 Thanks for helping improve local dictation on Windows. Contributions can be code, documentation, bug reports, accessibility feedback, installation results, or reproducible measurements. Please read the [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
-> **License status:** WaveType's project code does not yet have a declared license. Third-party components have separate terms in [LICENSES.md](LICENSES.md). Please check the current license status and discuss questions with the maintainer before starting a substantial code contribution.
+> **License:** WaveType project code is licensed under [MIT](LICENSE). Third-party components and artwork retain the separate terms listed in [LICENSES.md](LICENSES.md). Make sure you have the right to contribute any code or assets you submit.
 
 ## Find a useful task
 

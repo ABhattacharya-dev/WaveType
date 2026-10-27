@@ -46,6 +46,7 @@ if (-not $bundle.StartsWith($workspacePrefix, [StringComparison]::OrdinalIgnoreC
 }
 if (Test-Path -LiteralPath $nested) { Remove-Item -LiteralPath $nested -Recurse -Force }
 Copy-Item -LiteralPath $engineBundle -Destination $nested -Recurse
+Copy-Item -LiteralPath (Join-Path $project 'LICENSE') -Destination $bundle
 Copy-Item -LiteralPath (Join-Path $project 'LICENSES.md') -Destination $bundle
 Copy-Item -LiteralPath (Join-Path $project 'licenses') -Destination (Join-Path $bundle 'licenses') -Recurse
 Copy-Item -LiteralPath (Join-Path $project 'packaging\INSTALL-NOTICES.txt') -Destination $bundle

@@ -24,4 +24,4 @@ Before a stable release, validate clean Windows 10/11 systems with no Python or 
 
 Publish immutable artifacts, their checksums, source tag, version and honest validation status. The current app opens the GitHub releases page on demand; automatic update installation is not implemented. A future updater must verify the installer hash and trusted Authenticode signature before launching it.
 
-The repository currently supplies third-party notices in LICENSES.md and licenses/. Lordicon PRO redistribution requires the asset owner's applicable rights; the project code's public distribution license still needs an explicit choice by its owner before describing it as licensed open source.
+WaveType project code is licensed under MIT (see LICENSE). Third-party notices remain in LICENSES.md and licenses/. Lordicon PRO redistribution still requires the asset owner's applicable rights. The published 0.1.0-beta.1 installer predates the project-license update; future installer builds include LICENSE with the bundled notices.
