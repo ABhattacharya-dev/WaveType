@@ -12,7 +12,7 @@ Thanks for helping improve local dictation on Windows. Contributions can be code
 
 ## Report a bug
 
-For a suspected vulnerability, follow the [Security Policy](SECURITY.md) and report privately. For other bugs, choose the [bug report form](https://github.com/ABhattacharya-dev/WaveType/issues/new/choose) and include:
+For a suspected vulnerability, follow the [Security Policy](SECURITY.md) and report privately. For accessibility barriers, see the [Accessibility page](ACCESSIBILITY.md) and use the same [bug report form](https://github.com/ABhattacharya-dev/WaveType/issues/new/choose) as other bugs. Include:
 
 1. WaveType version or commit, Windows version, CPU, and GPU (if relevant).
 2. Whether you used the installer, desktop app from source, terminal client, or standalone pill.

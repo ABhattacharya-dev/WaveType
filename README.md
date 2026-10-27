@@ -104,6 +104,10 @@ WaveType has no telemetry or speech-upload path in the reviewed application sour
 
 History stores the final text, date/time, and foreground app name as readable local JSON. Installed-app models, settings, dictionaries, history, and logs live under `%LOCALAPPDATA%\STTCore` and remain after uninstall; delete that folder manually if you also want to remove local data. Read the full [privacy notes](docs/PRIVACY.md).
 
+## Accessibility
+
+WaveType is still being checked for keyboard, screen reader, contrast, and text scaling support. The [Accessibility page](ACCESSIBILITY.md) lists current input paths, known limits, and how to report a barrier.
+
 ## For developers
 
 | Area | Start here |
@@ -144,6 +148,7 @@ These documents and templates are available to contributors:
 | Security policy | [Read the Security Policy](SECURITY.md) | Added |
 | Issue templates | [Bug report](.github/ISSUE_TEMPLATE/01-bug-report.yml) · [Feature request](.github/ISSUE_TEMPLATE/02-feature-request.yml) | Added |
 | Pull request template | [Read the pull request template](.github/PULL_REQUEST_TEMPLATE.md) | Added |
+| Accessibility | [Read the Accessibility page](ACCESSIBILITY.md) | Added |
 
 ## License and credits
 
