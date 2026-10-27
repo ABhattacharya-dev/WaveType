@@ -1,9 +1,8 @@
 <p align="center">
-<!-- Logo slot: replace assets/logo.svg with your final WaveType logo, or change the path below. -->
 <img src="assets/logo.svg" alt="WaveType logo" width="112">
 </p>
 <h1 align="center">WaveType</h1>
-**Speak naturally. Type anywhere. Keep your dictation on your Windows PC.**
+Speak naturally. Type anywhere. Keep your dictation on your Windows PC.
 
 WaveType is a local dictation app for Windows 10 and 11. A floating pill and a **Ctrl+Win** shortcut turn speech into text with Parakeet Redux; optional Qwen Smart cleanup can polish the result before insertion. After the first model downloads, inference runs offline.
 
