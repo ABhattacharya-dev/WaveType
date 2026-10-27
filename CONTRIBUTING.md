@@ -63,7 +63,7 @@ Replay expects mono 16-bit PCM WAV. Include hardware, sample length, run count, 
 
 ## Open a pull request
 
-Open a [pull request against `main`](https://github.com/ABhattacharya-dev/WaveType/pulls) and include:
+Open a [pull request against `main`](https://github.com/ABhattacharya-dev/WaveType/pulls) using the [pull request template](.github/PULL_REQUEST_TEMPLATE.md). Include:
 
 - What problem the change solves and a link to its issue, if there is one.
 - The approach and any user-visible behavior changes.
