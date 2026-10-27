@@ -27,15 +27,20 @@ WaveType is a local dictation app for Windows 10 and 11. A floating pill and a *
 
 ## Preview
 
-<!-- Screenshot slots: replace each placeholder cell with an <img> pointing to your real capture. Suggested paths: assets/screenshots/desktop.png and assets/screenshots/pill.png. -->
 <table>
   <tr>
-    <td align="center" width="65%"><strong>Desktop window</strong><br><em>Add your WaveType desktop screenshot here<br><code>assets/screenshots/desktop.png</code></em></td>
-    <td align="center" width="35%"><strong>Floating pill</strong><br><em>Add your pill screenshot here<br><code>assets/screenshots/pill.png</code></em></td>
+    <!-- 
+    <td align="center" width="65%">
+      <strong>Desktop window</strong><br>
+      <em>Add your WaveType desktop screenshot here<br><code>assets/screenshots/desktop.png</code></em>
+    </td> 
+    -->
+    <td align="center" width="100%">
+      <strong>Floating pill</strong><br><br>
+      <img src="assets/screenshots/pill.gif" alt="WaveType Floating Pill Demo" width="100%">
+    </td>
   </tr>
 </table>
-
-The existing logo above uses [`assets/logo.svg`](assets/logo.svg). Replace that file or update its path when your final WaveType logo is ready. For screenshots, save real captures at the paths shown above and replace the two placeholder cells with image tags.
 
 ## Download and install
 
