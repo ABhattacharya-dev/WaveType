@@ -6,9 +6,9 @@ Speak naturally. Type anywhere. Keep your dictation on your Windows PC.
 
 WaveType is a local dictation app for Windows 10 and 11. A floating pill and a **Ctrl+Win** shortcut turn speech into text with Parakeet Redux; optional Qwen Smart cleanup can polish the result before insertion. After the first model downloads, inference runs offline.
 
-[![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&logoColor=white)](#download-and-install) [![Latest release](https://img.shields.io/github/v/release/ABhattacharya-dev/stt-core-structure?include_prereleases&label=release)](https://github.com/ABhattacharya-dev/stt-core-structure/releases) [![GitHub issues](https://img.shields.io/github/issues/ABhattacharya-dev/stt-core-structure)](https://github.com/ABhattacharya-dev/stt-core-structure/issues)
+[![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&logoColor=white)](#download-and-install) [![Latest release](https://img.shields.io/github/v/release/ABhattacharya-dev/WaveType?include_prereleases&label=release)](https://github.com/ABhattacharya-dev/WaveType/releases) [![GitHub issues](https://img.shields.io/github/issues/ABhattacharya-dev/WaveType)](https://github.com/ABhattacharya-dev/WaveType/issues)
 
-[Download the Windows preview](https://github.com/ABhattacharya-dev/stt-core-structure/releases/tag/v0.1.0-beta.1) · [See how it works](#how-to-dictate) · [Contribute](#contributing)
+[Download the Windows preview](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta.1) · [See how it works](#how-to-dictate) · [Contribute](#contributing)
 
 > [!NOTE]
 > The current Windows x64 release is **0.1.0 beta 1**. It is unsigned and has not yet been validated on a clean Windows installation or with Microsoft Defender. Keep Windows security protections enabled; see [release status](docs/RELEASE.md).
@@ -44,7 +44,7 @@ WaveType is a local dictation app for Windows 10 and 11. A floating pill and a *
 
 ## Download and install
 
-1. Download **`WaveType-0.1.0-beta.1-Setup-x64.exe`** from the [beta 1 release](https://github.com/ABhattacharya-dev/stt-core-structure/releases/tag/v0.1.0-beta.1). The release also provides SHA-256 checksums.
+1. Download **`WaveType-0.1.0-beta.1-Setup-x64.exe`** from the [beta 1 release](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta.1). The release also provides SHA-256 checksums.
 2. Run the installer on **Intel/AMD x64 Windows 10 or 11**. Python is included; no separate Python or CUDA Toolkit install is needed.
 3. Choose your installation folder and shortcuts. Startup on sign-in and the optional Smart cleanup download are off by default.
 4. Let setup download and verify the base speech model. If interrupted, WaveType resumes the download when launched. Then open WaveType and select a text box to start dictating.
@@ -67,8 +67,8 @@ Smart cleanup can be enabled in the tray or Settings. Downloading its model duri
 **Requirements:** Windows 10/11, Python 3.12, and internet access for first-run model/runtime downloads.
 
 ```powershell
-git clone https://github.com/ABhattacharya-dev/stt-core-structure.git
-cd stt-core-structure
+git clone https://github.com/ABhattacharya-dev/WaveType.git
+cd WaveType
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
@@ -124,17 +124,19 @@ For replay and evaluation, use `python demo_engine.py path\to\clip.wav` or `pyth
 
 ## Contributing
 
-Bug reports, Windows 10/11 installation results, accessibility feedback, documentation fixes, and reproducible performance measurements are useful. [Open an issue](https://github.com/ABhattacharya-dev/stt-core-structure/issues) with your Windows version, CPU/GPU, WaveType version, steps to reproduce, and relevant logs **with personal dictation removed**. For code or docs, fork the repo, make a focused change, run `python -m unittest discover` when applicable, and [open a pull request](https://github.com/ABhattacharya-dev/stt-core-structure/pulls) explaining what changed and how you checked it.
+Please read the [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
-If WaveType helps you, [star the repository](https://github.com/ABhattacharya-dev/stt-core-structure) so other Windows dictation users can find it.
+Bug reports, Windows 10/11 installation results, accessibility feedback, documentation fixes, and reproducible performance measurements are useful. [Open an issue](https://github.com/ABhattacharya-dev/WaveType/issues) with your Windows version, CPU/GPU, WaveType version, steps to reproduce, and relevant logs **with personal dictation removed**. For code or docs, fork the repo, make a focused change, run `python -m unittest discover` when applicable, and [open a pull request](https://github.com/ABhattacharya-dev/WaveType/pulls) explaining what changed and how you checked it.
+
+If WaveType helps you, [star the repository](https://github.com/ABhattacharya-dev/WaveType) so other Windows dictation users can find it.
 
 ### Community files being added
 
-These are the next project documents and GitHub templates. Paths are shown so you can check for each one as it is added; they are not published yet.
+The Code of Conduct is available now. The other documents and templates below will be linked as they are added.
 
-| Item | Planned path | Status |
+| Item | Document or path | Status |
 | --- | --- | --- |
-| Code of conduct | `CODE_OF_CONDUCT.md` | To add |
+| Code of conduct | [Read the Code of Conduct](CODE_OF_CONDUCT.md) | Added |
 | Contribution guide | `CONTRIBUTING.md` | To add |
 | Project-code license | `LICENSE` | To choose and add |
 | Security policy | `SECURITY.md` | To add |
