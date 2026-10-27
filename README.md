@@ -1,112 +1,142 @@
-# WaveType
+<p align="center">
+<!-- Logo slot: replace assets/logo.svg with your final WaveType logo, or change the path below. -->
+<img src="assets/logo.svg" alt="WaveType logo" width="112">
+</p>
+<h1 align="center">WaveType</h1>
+**Speak naturally. Type anywhere. Keep your dictation on your Windows PC.**
 
-Local Windows 10/11 dictation with Parakeet Redux transcription, optional Qwen cleanup, a resident engine, a terminal client, and a small floating pill with a desktop window. Runtime inference is offline after first-run downloads.
+WaveType is a local dictation app for Windows 10 and 11. A floating pill and a **Ctrl+Win** shortcut turn speech into text with Parakeet Redux; optional Qwen Smart cleanup can polish the result before insertion. After the first model downloads, inference runs offline.
 
-## Windows installer
+[![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&logoColor=white)](#download-and-install) [![Latest release](https://img.shields.io/github/v/release/ABhattacharya-dev/stt-core-structure?include_prereleases&label=release)](https://github.com/ABhattacharya-dev/stt-core-structure/releases) [![GitHub issues](https://img.shields.io/github/issues/ABhattacharya-dev/stt-core-structure)](https://github.com/ABhattacharya-dev/stt-core-structure/issues)
 
-Download `WaveType-0.1.0-beta.1-Setup-x64.exe` from the [GitHub prerelease](https://github.com/ABhattacharya-dev/stt-core-structure/releases/tag/v0.1.0-beta.1). It is for Intel/AMD x64 Windows 10/11 and includes Python, the app and the engine. Keep Defender enabled: this first preview is unsigned, and clean-machine and Defender validation are pending. The release includes SHA-256 checksums.
+[Download the Windows preview](https://github.com/ABhattacharya-dev/stt-core-structure/releases/tag/v0.1.0-beta.1) · [See how it works](#how-to-dictate) · [Contribute](#contributing)
 
-The wizard lets you choose an installation folder, Start Menu and desktop shortcuts, startup on sign-in, and whether to download optional Smart cleanup now. Startup and Smart cleanup downloads are off by default. Setup downloads and verifies the base speech model; interrupted downloads can resume when you launch WaveType. Smart cleanup remains off until enabled in the tray or Settings, even if its files were downloaded during setup. The finish page offers app launch and an unchecked developer-page link.
+> [!NOTE]
+> The current Windows x64 release is **0.1.0 beta 1**. It is unsigned and has not yet been validated on a clean Windows installation or with Microsoft Defender. Keep Windows security protections enabled; see [release status](docs/RELEASE.md).
 
-Speech processing runs locally after setup. Models, settings, personal dictionaries and history are retained under `%LOCALAPPDATA%\STTCore` when you uninstall. The uninstaller removes only shipped app files. Read the [privacy notes](docs/PRIVACY.md) and [release status](docs/RELEASE.md).
+## Why WaveType?
+
+| | |
+| --- | --- |
+| **Local transcription** | Parakeet Redux transcribes on your machine. Speech is not uploaded by WaveType; setup downloads verified model and runtime files. |
+| **Dictate into other apps** | Hold **Ctrl+Win** to record and release to insert text into the focused text box. A quick tap locks recording for hands-free speech. |
+| **Optional Smart cleanup** | Qwen3 4B can improve punctuation and grammar, resolve spoken corrections, or format requested JSON. It runs locally and is off by default. |
+| **Personal vocabulary** | Add recognition aliases and deliberate snippets for names, addresses, and phrases. |
+| **A small desktop companion** | Use the floating pill, tray menu, History, Dictionary, Settings, or the terminal client. |
+
+**Performance snapshot:** On one GTX 1650 / Ryzen 7 4800H development machine, a seven-second replay reached final text in **1.69 s p50 with GPU cleanup** or **3.76 s p50 with CPU-only cleanup**, measured after recording release and excluding model startup. See the [full benchmarks and limitations](docs/BENCHMARKS.md).
+
+## Preview
+
+<!-- Screenshot slots: replace each placeholder cell with an <img> pointing to your real capture. Suggested paths: assets/screenshots/desktop.png and assets/screenshots/pill.png. -->
+<table>
+  <tr>
+    <td align="center" width="65%"><strong>Desktop window</strong><br><em>Add your WaveType desktop screenshot here<br><code>assets/screenshots/desktop.png</code></em></td>
+    <td align="center" width="35%"><strong>Floating pill</strong><br><em>Add your pill screenshot here<br><code>assets/screenshots/pill.png</code></em></td>
+  </tr>
+</table>
+
+The existing logo above uses [`assets/logo.svg`](assets/logo.svg). Replace that file or update its path when your final WaveType logo is ready. For screenshots, save real captures at the paths shown above and replace the two placeholder cells with image tags.
+
+## Download and install
+
+1. Download **`WaveType-0.1.0-beta.1-Setup-x64.exe`** from the [beta 1 release](https://github.com/ABhattacharya-dev/stt-core-structure/releases/tag/v0.1.0-beta.1). The release also provides SHA-256 checksums.
+2. Run the installer on **Intel/AMD x64 Windows 10 or 11**. Python is included; no separate Python or CUDA Toolkit install is needed.
+3. Choose your installation folder and shortcuts. Startup on sign-in and the optional Smart cleanup download are off by default.
+4. Let setup download and verify the base speech model. If interrupted, WaveType resumes the download when launched. Then open WaveType and select a text box to start dictating.
+
+The installer and first use need internet for missing files. Transcription and optional cleanup run locally after their files are installed. ARM64 and 32-bit Windows are not supported by this release. See [privacy details](docs/PRIVACY.md) for network and data-storage behavior.
+
+## How to dictate
+
+| Action | What happens |
+| --- | --- |
+| Hold **Ctrl+Win**, then release | Record while held; insert the final text on release. |
+| Tap **Ctrl+Win** quickly | Lock recording; press **Ctrl+Win** again to send. |
+| Click the floating pill | Start locked recording; click again to send. Right-click to cancel. |
+| Right-click the tray icon → **WaveType** | Open History, Dictionary, Settings, and About. Choose **Exit** to stop the app and engine. |
+
+Smart cleanup can be enabled in the tray or Settings. Downloading its model during setup does not enable it. Windows may block text insertion into elevated apps; if that happens, the final text remains in History. The clipboard is untouched by hotkey insertion.
 
 ## Run from source
 
+**Requirements:** Windows 10/11, Python 3.12, and internet access for first-run model/runtime downloads.
+
 ```powershell
-git clone -b main https://github.com/ABhattacharya-dev/stt-core-structure.git
+git clone https://github.com/ABhattacharya-dev/stt-core-structure.git
 cd stt-core-structure
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+python desktop.py
 ```
 
-Start the terminal client with `python stt.py`. On first run the engine downloads the Parakeet GGUF and its small Windows C API library, resumes interrupted downloads, and verifies SHA-256. `runtime/parakeet-cli.exe` is included as a fallback. Answer `y` at **Smart cleanup? [y/N]:** to download and warm Qwen3 4B plus the verified llama.cpp runtime. The NVIDIA package includes CUDA runtime DLLs; it does not require an installed CUDA toolkit. A CPU package is selected when no suitable NVIDIA GPU is found. Model and runtime files are ignored by Git. Subsequent runs need no internet.
+The first desktop launch downloads and verifies Parakeet. Later launches show the pill and tray icon; the main window opens from the tray. For the terminal client, run `python stt.py` and press Enter to start and stop a recording. It asks whether to enable Smart cleanup; the default is **No**. Run `python stt.py --show-raw` to see the raw transcript alongside the final text.
 
-Run `python desktop.py` for the Windows app. Its first-run screen waits while the engine downloads and verifies Parakeet. Later launches show only the pill and notification-area icon; right-click the icon and choose **WaveType** to open History, Dictionary, Settings, and About, or **Exit** to stop the app and its engine. The main window appears in the taskbar while open or minimized. Closing it removes the taskbar entry and leaves dictation active in the tray. The Smart cleanup toggle stays synchronized between the tray and Settings. The default light theme uses a warm off-white palette. System and dark themes are available in Settings. The app owns the engine as a hidden child process and communicates through the local [IPC API](docs/IPC.md).
+For the standalone pill, run `python pill.py`; use `--smart` for optional cleanup or `--tap-threshold-ms 300` to adjust the quick-tap threshold. For a standalone engine, run `python engine.py serve --hotkey`. The terminal client leaves its resident engine running after exit; the desktop app owns and stops its engine when you choose **Exit**.
 
-The installer is built from `build.ps1` and `installer.nsi`. The current preview was compiled after source review; no tests or clean-VM installation checks were run for this release pass, as requested. Earlier development installers were checked on this Windows 11 machine.
-
-The engine remains running after the CLI exits. It unloads Parakeet after about 20 idle seconds and the optional cleanup model after five idle minutes. Stop it with:
-
-```powershell
-python -c "from client import EngineClient; c=EngineClient(); c.command('shutdown'); c.close()"
-```
-
-The CLI prompts for Enter to start and Enter to stop. `python stt.py --show-raw` also prints the raw transcript. Only the final text is printed normally. Cleanup can resolve spoken corrections, grammar and punctuation, and JSON beginning with “write in JSON format.” Invalid or unsafe cleanup falls back to the transcript with snippets applied.
-
-## Floating pill
-
-Run `python pill.py` and leave it running. Select a text box in another app, then hold Ctrl+Win to record and release to insert text. A quick tap (under 250 ms) locks recording; press Ctrl+Win again to send. Click the pill to start locked recording and click again to send. Right-click it to cancel. The pill does not take focus from the text box. Run `python pill.py --tap-threshold-ms 300` to adjust tap timing, or add `--smart` for optional cleanup. Close the process with Ctrl+C in its terminal. Windows can block insertion into elevated apps; an insertion failure appears on the pill, and the final text remains in history.
-
-## Personal terms
+<details>
+<summary>Personal terms and vocabulary in source runs</summary>
 
 Create `personal_terms.json` beside `stt.py` for deliberate snippets:
 
 ```json
-{"name":"Your Full Name","second email":"you@example.com","phone number":"+1 555 0100"}
+{"name":"Your Full Name","second email":"you@example.com"}
 ```
 
-Say “insert my” followed by any key. Ordinary mentions stay unchanged. Create `personal_vocabulary.json` separately for exact recognition aliases:
+Say **“insert my”** followed by a key. Ordinary mentions are unchanged. Create `personal_vocabulary.json` for exact recognition aliases:
 
 ```json
-{"Parakeet Redux":["parakeet redox"],"Your Name":["your name as Parakeet often hears it"]}
+{"Parakeet Redux":["parakeet redox"]}
 ```
 
-Parakeet's current CLI has no hotword parameter. Vocabulary aliases correct known misrecognitions after ASR; they do not change decoding. Keep aliases specific to avoid replacing unrelated speech. Both personal files are ignored by Git.
+Aliases correct known misrecognitions after transcription; they do not change Parakeet decoding. Keep them specific. Both files are ignored by Git. In the installed app, edit them through **Dictionary** instead.
 
-In the installed app, these files live in `%LOCALAPPDATA%\STTCore`; edit them in Dictionary instead of opening JSON. The current Parakeet adapter detects language automatically across Redux's supported languages. A fixed-language selection is not implemented.
+</details>
 
-## Engine, replay and evaluation
+## Privacy and local data
+
+WaveType has no telemetry or speech-upload path in the reviewed application source. Parakeet runs locally; optional Qwen cleanup and the engine's authenticated IPC bind to `127.0.0.1`. Setup fetches missing models and runtimes over HTTPS and checks pinned SHA-256 hashes. An app receiving inserted text may independently sync it.
+
+History stores the final text, date/time, and foreground app name as readable local JSON. Installed-app models, settings, dictionaries, history, and logs live under `%LOCALAPPDATA%\STTCore` and remain after uninstall; delete that folder manually if you also want to remove local data. Read the full [privacy notes](docs/PRIVACY.md).
+
+## For developers
+
+| Area | Start here |
+| --- | --- |
+| Desktop UI and pill | `desktop.py`, `pill.py`, [UI architecture](docs/UI_ARCHITECTURE.md) |
+| Engine, audio, hotkeys, insertion | `engine.py`, `windows_support.py`, [architecture](docs/ARCHITECTURE.md) |
+| Local client protocol | `client.py`, `ipc_protocol.py`, [IPC API](docs/IPC.md) |
+| Models, cleanup, personal data | `model_manager.py`, `smart.py`, `vocabulary.py`, `user_data.py` |
+| Packaging and release | `build.ps1`, `installer.nsi`, [release notes](docs/RELEASE.md) |
+
+Run the regression suite before opening a pull request:
 
 ```powershell
-python engine.py serve --hotkey
-python demo_engine.py path\to\clip.wav
-python evaluate.py path\to\clip.wav --smart --tier auto --warmup
-python evaluate.py path\to\clip.wav --smart --tier cpu --warmup
-python evaluate.py --manifest recordings.jsonl
-python -m unittest test_smart test_engine test_user_data
+python -m unittest discover
 ```
 
-The hotkey defaults to Ctrl+Win. The standalone engine defaults to hold mode; the pill selects hybrid hold/tap mode. Clients can still select tap mode over IPC: first press locks, second press sends. Hotkey results type into the focused app with Unicode `SendInput`; the clipboard is untouched. Windows may block insertion into an elevated target. The final text remains in history even if insertion fails. The full client protocol is in [docs/IPC.md](docs/IPC.md), and design choices are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+For replay and evaluation, use `python demo_engine.py path\to\clip.wav` or `python evaluate.py path\to\clip.wav --smart --tier auto --warmup`. A manifest can contain one `{"wav":"clip1.wav","reference":"the exact words you spoke"}` object per line; run it with `python evaluate.py --manifest recordings.jsonl`. Replay expects mono 16-bit PCM WAV. The report includes stage latency and word error rate against raw ASR. See the [architecture notes](docs/ARCHITECTURE.md) for the resident engine design.
 
-For WER, create `recordings.jsonl` with one object per line:
+## Contributing
 
-```json
-{"wav":"clip1.wav","reference":"the exact words you spoke"}
-```
+Bug reports, Windows 10/11 installation results, accessibility feedback, documentation fixes, and reproducible performance measurements are useful. [Open an issue](https://github.com/ABhattacharya-dev/stt-core-structure/issues) with your Windows version, CPU/GPU, WaveType version, steps to reproduce, and relevant logs **with personal dictation removed**. For code or docs, fork the repo, make a focused change, run `python -m unittest discover` when applicable, and [open a pull request](https://github.com/ABhattacharya-dev/stt-core-structure/pulls) explaining what changed and how you checked it.
 
-Replay requires mono 16-bit PCM WAV. The report includes p50/p95 stage latency, raw/final text and WER against the raw ASR output. WER only becomes meaningful with your own labeled recordings.
+If WaveType helps you, [star the repository](https://github.com/ABhattacharya-dev/stt-core-structure) so other Windows dictation users can find it.
 
-History is stored in ignored `history/YYYY-MM-DD.jsonl` in source runs, or `%LOCALAPPDATA%\STTCore\history` in the installed app. Each record contains only `date`, `time`, final `text`, and the foreground app name. The History screen groups entries by day and lets you delete a row on hover. On startup, older entries are compacted and WAV files previously generated in `history/audio` are removed. Logs and the IPC endpoint are under `%LOCALAPPDATA%\STTCore`.
+### Community files being added
 
-## Code layout
+These are the next project documents and GitHub templates. Paths are shown so you can check for each one as it is added; they are not published yet.
 
-| Files | Responsibility |
-| --- | --- |
-| `desktop.py`, `pill.py` | Desktop screens, tray, nonactivating pill |
-| `client.py`, `ipc_protocol.py` | Local IPC client and endpoint paths |
-| `engine.py`, `windows_support.py` | Capture, ASR, hotkeys, process lifetime and insertion |
-| `stt.py`, `smart.py`, `vocabulary.py` | Terminal client, cleanup and personal replacements |
-| `model_manager.py`, `user_data.py` | Verified downloads, dictionary and compact history |
-| `evaluate.py`, `benchmark_*.py`, `demo_engine.py` | Replay, latency, accuracy and IPC checks |
-| `test_*.py` | Regression tests |
-| `assets/`, `licenses/`, `docs/` | UI assets, third-party notices and architecture |
+| Item | Planned path | Status |
+| --- | --- | --- |
+| Code of conduct | `CODE_OF_CONDUCT.md` | To add |
+| Contribution guide | `CONTRIBUTING.md` | To add |
+| Project-code license | `LICENSE` | To choose and add |
+| Security policy | `SECURITY.md` | To add |
+| Issue templates | `.github/ISSUE_TEMPLATE/` | To add |
+| Pull request template | `.github/PULL_REQUEST_TEMPLATE.md` | To add |
 
-Run `python -m unittest discover` before contributing. Models, personal dictionaries, history, benchmark artifacts and build outputs stay out of Git. The `core-structure` branch preserves the original terminal prototype; `feature` contains the current app.
+## License and credits
 
-## Measured on this machine
-
-GTX 1650 4 GB / Ryzen 7 4800H, one seven-second sample WAV replayed three measured times, October 12, 2026. The resident engine used one extra warmup replay. The prior script path was measured with prompt caching disabled and model startup reported separately. Times below are from replay release to text, excluding model startup and audio duration:
-
-| Path | ASR p50/p95 | Cleanup p50/p95 | Release to ready p50/p95 |
-| --- | --- | --- | --- |
-| Prior GPU | 1.28/1.28 s | 4.77/4.78 s | 6.04/6.05 s |
-| Engine GPU | 0.70/0.72 s | 0.96/0.98 s | 1.69/1.69 s |
-| Prior CPU simulation | 1.40/1.83 s | 10.01/10.02 s timeout | 11.42/11.84 s, raw fallback |
-| Engine CPU-only | 0.74/0.86 s | 3.02/3.05 s | 3.76/3.94 s |
-
-Enabling prompt caching cut a short correction's GPU cleanup from about 4.0 s to 0.24–0.43 s after warmup; CPU cleanup took 1.21 s on the same short correction after a 13.94 s startup. The 32-case text fixture benchmark passed 29 cases with 0.404 s median cleanup. Its misses were a grammar singular/plural change, one extra comma, and a JSON quantity correction that kept the old number. Valid JSON can still be semantically wrong. Redux cannot use `parakeet-cli --stream`; its CLI reports that the model is not cache-aware. Pauses can be transcribed in the background, but the final segment still incurs ASR work at release. An official 213 MB packed Redux model produced the same sample text but took 25–27 s per clip on this CPU/build, so Q8 remains the default.
-
-## Branding
-
-The app icon is generated from `assets/logo.svg`; the sidebar uses `assets/logo_expanded.svg`. Windows/Tk use the checked-in `WaveType.ico` and `logo_expanded.png` derivatives, so no SVG renderer is needed at runtime. The existing `STTCore` data folder is retained for compatibility with saved settings and history. Startup uses the WaveType registry value and migrates the previous STT Core value when changed.
+The repository currently has **no declared license for its project code**. See [third-party notices](LICENSES.md) for the Parakeet, Qwen, llama.cpp, parakeet.cpp, font, and icon assets and their separate terms. A project-code license needs to be selected before describing WaveType as licensed open source.
