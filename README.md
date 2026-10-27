@@ -126,20 +126,22 @@ For replay and evaluation, use `python demo_engine.py path\to\clip.wav` or `pyth
 
 Please read the [Code of Conduct](CODE_OF_CONDUCT.md) and [Contributing guide](CONTRIBUTING.md) before participating.
 
+For suspected vulnerabilities, use the [Security Policy](SECURITY.md) instead of a public issue.
+
 Bug reports, Windows 10/11 installation results, accessibility feedback, documentation fixes, and reproducible performance measurements are useful. [Open an issue](https://github.com/ABhattacharya-dev/WaveType/issues) with your Windows version, CPU/GPU, WaveType version, steps to reproduce, and relevant logs **with personal dictation removed**. For code or docs, fork the repo, make a focused change, run `python -m unittest discover` when applicable, and [open a pull request](https://github.com/ABhattacharya-dev/WaveType/pulls) explaining what changed and how you checked it.
 
 If WaveType helps you, [star the repository](https://github.com/ABhattacharya-dev/WaveType) so other Windows dictation users can find it.
 
 ### Community files being added
 
-The Code of Conduct, Contributing guide, and project-code license are available now. The remaining documents and templates will be linked as they are added.
+The Code of Conduct, Contributing guide, project-code license, and Security Policy are available now. The remaining templates will be linked as they are added.
 
 | Item | Document or path | Status |
 | --- | --- | --- |
 | Code of conduct | [Read the Code of Conduct](CODE_OF_CONDUCT.md) | Added |
 | Contribution guide | [Read the Contributing guide](CONTRIBUTING.md) | Added |
 | Project-code license | [MIT License](LICENSE) | Added |
-| Security policy | `SECURITY.md` | To add |
+| Security policy | [Read the Security Policy](SECURITY.md) | Added |
 | Issue templates | `.github/ISSUE_TEMPLATE/` | To add |
 | Pull request template | `.github/PULL_REQUEST_TEMPLATE.md` | To add |
 
