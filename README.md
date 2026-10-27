@@ -124,7 +124,7 @@ For replay and evaluation, use `python demo_engine.py path\to\clip.wav` or `pyth
 
 ## Contributing
 
-Please read the [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
+Please read the [Code of Conduct](CODE_OF_CONDUCT.md) and [Contributing guide](CONTRIBUTING.md) before participating.
 
 Bug reports, Windows 10/11 installation results, accessibility feedback, documentation fixes, and reproducible performance measurements are useful. [Open an issue](https://github.com/ABhattacharya-dev/WaveType/issues) with your Windows version, CPU/GPU, WaveType version, steps to reproduce, and relevant logs **with personal dictation removed**. For code or docs, fork the repo, make a focused change, run `python -m unittest discover` when applicable, and [open a pull request](https://github.com/ABhattacharya-dev/WaveType/pulls) explaining what changed and how you checked it.
 
@@ -132,12 +132,12 @@ If WaveType helps you, [star the repository](https://github.com/ABhattacharya-de
 
 ### Community files being added
 
-The Code of Conduct is available now. The other documents and templates below will be linked as they are added.
+The Code of Conduct and Contributing guide are available now. The other documents and templates below will be linked as they are added.
 
 | Item | Document or path | Status |
 | --- | --- | --- |
 | Code of conduct | [Read the Code of Conduct](CODE_OF_CONDUCT.md) | Added |
-| Contribution guide | `CONTRIBUTING.md` | To add |
+| Contribution guide | [Read the Contributing guide](CONTRIBUTING.md) | Added |
 | Project-code license | `LICENSE` | To choose and add |
 | Security policy | `SECURITY.md` | To add |
 | Issue templates | `.github/ISSUE_TEMPLATE/` | To add |
