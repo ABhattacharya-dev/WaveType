@@ -59,7 +59,7 @@ python demo_engine.py path\to\clip.wav
 python evaluate.py path\to\clip.wav --smart --tier auto --warmup
 ```
 
-Replay expects mono 16-bit PCM WAV. Include hardware, sample length, run count, and warmup details with performance claims. See the [benchmark methodology](docs/BENCHMARKS.md). For installer changes, follow the checks and limitations in [release documentation](docs/RELEASE.md); source tests alone do not validate an installer.
+Replay expects mono 16-bit PCM WAV. Include hardware, sample length, run count, and warmup details with performance claims. For installer changes, follow the checks and limitations in [release documentation](docs/RELEASE.md); source tests alone do not validate an installer.
 
 ## Open a pull request
 
