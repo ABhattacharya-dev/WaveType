@@ -128,13 +128,13 @@ Please read the [Code of Conduct](CODE_OF_CONDUCT.md) and [Contributing guide](C
 
 For suspected vulnerabilities, use the [Security Policy](SECURITY.md) instead of a public issue.
 
-Bug reports, Windows 10/11 installation results, accessibility feedback, documentation fixes, and reproducible performance measurements are useful. [Open an issue](https://github.com/ABhattacharya-dev/WaveType/issues) with your Windows version, CPU/GPU, WaveType version, steps to reproduce, and relevant logs **with personal dictation removed**. For code or docs, fork the repo, make a focused change, run `python -m unittest discover` when applicable, and [open a pull request](https://github.com/ABhattacharya-dev/WaveType/pulls) explaining what changed and how you checked it.
+Bug reports, Windows 10/11 installation results, accessibility feedback, documentation fixes, and reproducible performance measurements are useful. [Open an issue](https://github.com/ABhattacharya-dev/WaveType/issues) with your Windows version, CPU/GPU, WaveType version, steps to reproduce, and relevant logs **with personal dictation removed**. For code or docs, fork the repo, make a focused change, run `python -m unittest discover` when applicable, and [open a pull request](https://github.com/ABhattacharya-dev/WaveType/pulls) using the [pull request template](.github/PULL_REQUEST_TEMPLATE.md) to explain what changed and how you checked it.
 
 If WaveType helps you, [star the repository](https://github.com/ABhattacharya-dev/WaveType) so other Windows dictation users can find it.
 
-### Community files being added
+### Community files
 
-The Code of Conduct, Contributing guide, project-code license, Security Policy, and issue forms are available now. The pull request template will be linked when added.
+These documents and templates are available to contributors:
 
 | Item | Document or path | Status |
 | --- | --- | --- |
@@ -143,7 +143,7 @@ The Code of Conduct, Contributing guide, project-code license, Security Policy, 
 | Project-code license | [MIT License](LICENSE) | Added |
 | Security policy | [Read the Security Policy](SECURITY.md) | Added |
 | Issue templates | [Bug report](.github/ISSUE_TEMPLATE/01-bug-report.yml) · [Feature request](.github/ISSUE_TEMPLATE/02-feature-request.yml) | Added |
-| Pull request template | `.github/PULL_REQUEST_TEMPLATE.md` | To add |
+| Pull request template | [Read the pull request template](.github/PULL_REQUEST_TEMPLATE.md) | Added |
 
 ## License and credits
 
