@@ -31,4 +31,3 @@ The maintainer will review reports as privately as practical, consider the conte
 ## Enforcement
 
 The maintainer may ask someone to change their behavior, edit or remove project content, issue a warning, limit participation temporarily, or ban participation. The response will depend on the severity, history, and impact of the behavior. Immediate restrictions may be used when needed to protect participants.
-
