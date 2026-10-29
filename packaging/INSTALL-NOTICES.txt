@@ -37,6 +37,9 @@ scan of the final package are still required. A clean antivirus result and
 absence of SmartScreen warnings are not guaranteed.
 Never disable antivirus or add exclusions to run WaveType.
 
+WaveType project code: MIT License. The full text is in LICENSE in the installation folder.
+Third-party components retain their own licenses; see LICENSES.md and licenses/.
+
 Third-party components:
 Parakeet Redux weights: CC BY 4.0 (Moondream and NVIDIA).
 Qwen3 cleanup weights: Apache 2.0 (Qwen Team), optional download.
@@ -48,4 +51,4 @@ Python, Tcl/Tk, sounddevice, PortAudio, CFFI and WebRTC VAD: upstream licenses.
 Full notices and available license texts are installed with the application.
 
 Developer: https://github.com/ABhattacharya-dev
-Source: https://github.com/ABhattacharya-dev/stt-core-structure
+Source: https://github.com/ABhattacharya-dev/WaveType

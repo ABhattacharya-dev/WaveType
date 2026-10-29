@@ -39,9 +39,9 @@ VIAddVersionKey "LegalCopyright" "WaveType contributors"
 !define MUI_WELCOMEPAGE_TITLE "Welcome to WaveType"
 !define MUI_WELCOMEPAGE_TEXT "Dictate into your favorite Windows apps with Ctrl + Win.$\r$\n$\r$\nWaveType installs for your account without administrator access. On first launch, the app downloads and verifies Parakeet Redux. Optional Qwen Smart cleanup can be downloaded later in Settings."
 !insertmacro MUI_PAGE_WELCOME
-!define MUI_PAGE_HEADER_TEXT "Privacy and third-party notices"
+!define MUI_PAGE_HEADER_TEXT "Privacy and license notices"
 !define MUI_PAGE_HEADER_SUBTEXT "Review local data handling and bundled components."
-!define MUI_LICENSEPAGE_TEXT_TOP "WaveType keeps speech processing local. These are privacy and third-party notices."
+!define MUI_LICENSEPAGE_TEXT_TOP "WaveType keeps speech processing local. Review privacy and license notices."
 !define MUI_LICENSEPAGE_BUTTON "Next >"
 !insertmacro MUI_PAGE_LICENSE "packaging\INSTALL-NOTICES.txt"
 Page custom OptionsCreate OptionsLeave

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/ABhattacharya-dev/WaveType/blob/main/SECURITY.md
+    about: Use the private reporting instructions in the Security Policy; do not open a public issue.
