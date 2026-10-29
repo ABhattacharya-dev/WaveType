@@ -292,6 +292,10 @@ Section "WaveType" MainSection
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "WaveType"
   ${EndIf}
   WriteRegStr HKCU "Software\WaveType" "InstallDir" "$INSTDIR"
+  ; Windows Settings expects the installed application size in KiB, not installer size.
+  ; Downloaded models and personal data live separately and are shown in WaveType.
+  ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType" "EstimatedSize" $0
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType" "DisplayName" "WaveType"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType" "Publisher" "ABhattacharya-dev"
