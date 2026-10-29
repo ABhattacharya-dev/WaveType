@@ -4,9 +4,10 @@ Unicode true
 !include "LogicLib.nsh"
 !include "x64.nsh"
 !include "WinVer.nsh"
+!include "FileFunc.nsh"
 
 !ifndef APP_VERSION
-  !define APP_VERSION "0.1.0-beta.1"
+  !define APP_VERSION "0.1.0-beta1.01"
 !endif
 !ifndef FILE_VERSION
   !define FILE_VERSION "0.1.0.0"
@@ -36,7 +37,7 @@ VIAddVersionKey "LegalCopyright" "WaveType contributors"
 !define MUI_UNWELCOMEFINISHPAGE_BITMAP "assets\installer\wizard.bmp"
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Welcome to WaveType"
-!define MUI_WELCOMEPAGE_TEXT "Dictate into your favorite Windows apps with Ctrl + Win.$\r$\n$\r$\nSpeech recognition and optional Smart cleanup run on this computer. Setup downloads and verifies the speech model and runtime; an internet connection and several GB of free space are needed.$\r$\n$\r$\nWaveType installs for your account without administrator access."
+!define MUI_WELCOMEPAGE_TEXT "Dictate into your favorite Windows apps with Ctrl + Win.$\r$\n$\r$\nWaveType installs for your account without administrator access. On first launch, the app downloads and verifies Parakeet Redux. Optional Qwen Smart cleanup can be downloaded later in Settings."
 !insertmacro MUI_PAGE_WELCOME
 !define MUI_PAGE_HEADER_TEXT "Privacy and third-party notices"
 !define MUI_PAGE_HEADER_SUBTEXT "Review local data handling and bundled components."
@@ -48,7 +49,7 @@ Page custom OptionsCreate OptionsLeave
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TITLE "WaveType is installed"
-!define MUI_FINISHPAGE_TEXT "Open a text box, then hold Ctrl + Win to dictate or tap to lock recording.$\r$\n$\r$\nClosing the main window leaves WaveType running in the tray. Choose Exit from the tray to stop it.$\r$\n$\r$\nIf a model download was interrupted, launch WaveType with an internet connection to resume it."
+!define MUI_FINISHPAGE_TEXT "Launch WaveType to download Parakeet Redux. Settings shows model progress and lets you pause, cancel, retry or repair either model. Qwen Smart cleanup is optional.$\r$\n$\r$\nAfter Parakeet is ready, open a text box and hold Ctrl + Win to dictate. Closing the main window leaves WaveType running in the tray."
 !define MUI_FINISHPAGE_RUN "$INSTDIR\WaveType.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Launch WaveType"
 !define MUI_FINISHPAGE_SHOWREADME ""
@@ -65,11 +66,13 @@ Var Dialog
 Var StartMenuBox
 Var DesktopBox
 Var StartupBox
-Var CleanupBox
 Var StartMenuChoice
 Var DesktopChoice
 Var StartupChoice
-Var CleanupChoice
+Var MaintenanceMutex
+Var UiLock
+Var EngineLock
+Var RemovalFailed
 
 Function .onInit
   ${IfNot} ${IsNativeAMD64}
@@ -84,7 +87,6 @@ Function .onInit
   StrCpy $StartMenuChoice ${BST_CHECKED}
   StrCpy $DesktopChoice ${BST_CHECKED}
   StrCpy $StartupChoice ${BST_UNCHECKED}
-  StrCpy $CleanupChoice ${BST_UNCHECKED}
   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "WaveType"
   ${If} $0 == ""
     ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "STT Core"
@@ -92,33 +94,91 @@ Function .onInit
   ${If} $0 != ""
     StrCpy $StartupChoice ${BST_CHECKED}
   ${EndIf}
-  Call CheckRunning
+  StrCpy $UiLock -1
+  StrCpy $EngineLock -1
+  System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\WaveTypeMaintenance") p .r0 ?e'
+  Pop $1
+  StrCpy $MaintenanceMutex $0
+  ${If} $1 == 183
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\maintenance.ps1 "packaging\maintenance.ps1"
 FunctionEnd
 
 !macro CheckRunningBody
-  IfFileExists "$LOCALAPPDATA\STTCore\ui.lock" 0 done
-  System::Call 'kernel32::CreateFileW(w "$LOCALAPPDATA\STTCore\ui.lock", i 0, i 0, p 0, i 3, i 0, p 0) p.r0'
-  ${If} $0 == -1
-    System::Call 'kernel32::GetLastError() i.r1'
-    ${If} $1 == 32
-      MessageBox MB_ICONEXCLAMATION|MB_OK "Please choose Exit from the WaveType tray menu, then run setup again."
-      Abort
-    ${EndIf}
-  ${Else}
-    System::Call 'kernel32::CloseHandle(p r0)'
+  retry:
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\maintenance.ps1" -Action Check -InstallDir "$INSTDIR"'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    Goto blocked
   ${EndIf}
-  done:
+  CreateDirectory "$LOCALAPPDATA\STTCore"
+  System::Call 'kernel32::CreateFileW(w "$LOCALAPPDATA\STTCore\ui.lock", i 0xC0000000, i 0, p 0, i 4, i 0, p 0) p.r0'
+  StrCpy $UiLock $0
+  IntCmp $UiLock -1 blocked
+  System::Call 'kernel32::CreateFileW(w "$LOCALAPPDATA\STTCore\engine.lock", i 0xC0000000, i 0, p 0, i 4, i 0, p 0) p.r0'
+  StrCpy $EngineLock $0
+  IntCmp $EngineLock -1 blocked
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\maintenance.ps1" -Action Check -InstallDir "$INSTDIR"'
+  Pop $0
+  Pop $1
+  ${If} $0 == 0
+    Return
+  ${EndIf}
+  blocked:
+  System::Call 'kernel32::CloseHandle(p $UiLock)'
+  System::Call 'kernel32::CloseHandle(p $EngineLock)'
+  StrCpy $UiLock -1
+  StrCpy $EngineLock -1
+  IfSilent canceled
+  MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "WaveType files are in use or unavailable.$\r$\n$\r$\nChoose Exit from the WaveType tray menu and close any WaveType terminal clients. Active recording will stop. If it is unresponsive, end WaveType and its engine in Task Manager.$\r$\n$\r$\nThen choose Retry. Details: $1" IDRETRY retry
+  canceled:
+  SetErrorLevel 2
+  Abort
 !macroend
 Function CheckRunning
   !insertmacro CheckRunningBody
 FunctionEnd
 Function un.onInit
   SetRegView 64
+  StrCpy $UiLock -1
+  StrCpy $EngineLock -1
+  System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\WaveTypeMaintenance") p .r0 ?e'
+  Pop $1
+  StrCpy $MaintenanceMutex $0
+  ${If} $1 == 183
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\maintenance.ps1 "packaging\maintenance.ps1"
+FunctionEnd
+
+Function un.CheckRunning
   !insertmacro CheckRunningBody
 FunctionEnd
 
+!macro ReleaseMaintenance
+  System::Call 'kernel32::CloseHandle(p $UiLock)'
+  System::Call 'kernel32::CloseHandle(p $EngineLock)'
+  StrCpy $UiLock -1
+  StrCpy $EngineLock -1
+  System::Call 'kernel32::CloseHandle(p $MaintenanceMutex)'
+  StrCpy $MaintenanceMutex 0
+!macroend
+
+Function .onGUIEnd
+  !insertmacro ReleaseMaintenance
+FunctionEnd
+Function un.onGUIEnd
+  !insertmacro ReleaseMaintenance
+FunctionEnd
+
 Function OptionsCreate
-  !insertmacro MUI_HEADER_TEXT "Choose your options" "Shortcuts, startup and optional Smart cleanup."
+  !insertmacro MUI_HEADER_TEXT "Choose your options" "Shortcuts and startup."
   nsDialogs::Create 1018
   Pop $Dialog
   ${If} $Dialog == error
@@ -133,12 +193,9 @@ Function OptionsCreate
   ${NSD_CreateCheckbox} 0 40u 100% 14u "Start WaveType when I sign in to Windows"
   Pop $StartupBox
   ${NSD_SetState} $StartupBox $StartupChoice
-  ${NSD_CreateCheckbox} 0 60u 100% 14u "Download the optional Smart cleanup model now"
-  Pop $CleanupBox
-  ${NSD_SetState} $CleanupBox $CleanupChoice
-  ${NSD_CreateLabel} 12u 80u 94% 30u "Smart cleanup fixes grammar and spoken corrections locally. It needs an additional download and several GB of RAM. You can download and enable it later in Settings."
+  ${NSD_CreateLabel} 0 65u 100% 35u "After installation, WaveType downloads the speech model on first launch. Manage both model downloads in Settings. Qwen Smart cleanup stays optional."
   Pop $0
-  ${NSD_CreateLabel} 0 116u 100% 12u "No Python or CUDA Toolkit required. Dictation stays local."
+  ${NSD_CreateLabel} 0 108u 100% 12u "No Python or CUDA Toolkit required. Dictation stays local."
   Pop $0
   nsDialogs::Show
 FunctionEnd
@@ -147,7 +204,6 @@ Function OptionsLeave
   ${NSD_GetState} $StartMenuBox $StartMenuChoice
   ${NSD_GetState} $DesktopBox $DesktopChoice
   ${NSD_GetState} $StartupBox $StartupChoice
-  ${NSD_GetState} $CleanupBox $CleanupChoice
 FunctionEnd
 
 Function VerifyDirectory
@@ -177,6 +233,7 @@ FunctionEnd
 Section "WaveType" MainSection
   SetShellVarContext current
   SetRegView 64
+  Call CheckRunning
   SetOutPath "$INSTDIR"
   ClearErrors
   File /r "dist\WaveType\*.*"
@@ -184,6 +241,9 @@ Section "WaveType" MainSection
     MessageBox MB_ICONSTOP|MB_OK "Could not copy WaveType. Choose a folder your account can write to, and close any running WaveType instance."
     Abort
   ${EndIf}
+  IfFileExists "$INSTDIR\engine\WaveTypeEngine.exe" +3
+    MessageBox MB_ICONSTOP|MB_OK "The engine was not copied. Check available disk space and retry setup."
+    Abort
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   ${If} $StartMenuChoice == ${BST_CHECKED}
     CreateDirectory "$SMPROGRAMS\WaveType"
@@ -215,37 +275,43 @@ Section "WaveType" MainSection
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType" "URLInfoAbout" "https://github.com/ABhattacharya-dev"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType" "NoRepair" 1
-
-  DetailPrint "Preparing verified local speech files. Internet is needed for missing files."
-  ${If} $CleanupChoice == ${BST_CHECKED}
-    nsExec::ExecToLog '"$INSTDIR\engine\WaveTypeEngine.exe" setup --cleanup'
-  ${Else}
-    nsExec::ExecToLog '"$INSTDIR\engine\WaveTypeEngine.exe" setup'
-  ${EndIf}
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "Model setup did not finish. The app is installed; launch it to resume downloads."
-    IfSilent download_done
-    MessageBox MB_ICONEXCLAMATION|MB_OK "WaveType is installed, but model setup could not finish. Launch WaveType with an internet connection to resume. Smart cleanup remains optional."
-  ${EndIf}
-  download_done:
+  !insertmacro ReleaseMaintenance
 SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
   SetRegView 64
-  Delete "$DESKTOP\WaveType.lnk"
-  Delete "$SMPROGRAMS\WaveType\WaveType.lnk"
-  Delete "$SMPROGRAMS\WaveType\Uninstall WaveType.lnk"
-  RMDir "$SMPROGRAMS\WaveType"
+  SetOutPath "$TEMP"
+  Call un.CheckRunning
+  StrCpy $RemovalFailed 0
+  !include "build\uninstall-files.nsh"
+  ${If} $RemovalFailed != 0
+    DetailPrint "Some application files could not be removed. Uninstall registration was kept."
+    IfSilent +2
+    MessageBox MB_ICONSTOP|MB_OK "Some WaveType files could not be removed. Close WaveType and retry uninstall. Your uninstall entry and local data have been kept."
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
+  System::Call 'kernel32::CloseHandle(p $UiLock)'
+  System::Call 'kernel32::CloseHandle(p $EngineLock)'
+  StrCpy $UiLock -1
+  StrCpy $EngineLock -1
+  Delete "$INSTDIR\Uninstall.exe"
+  IfFileExists "$INSTDIR\Uninstall.exe" 0 +4
+    DetailPrint "Could not remove Uninstall.exe; registration was kept."
+    SetErrorLevel 2
+    Abort
   ReadRegStr $0 HKCU "Software\WaveType" "InstallDir"
   ${If} $0 == $INSTDIR
+    Delete "$DESKTOP\WaveType.lnk"
+    Delete "$SMPROGRAMS\WaveType\WaveType.lnk"
+    Delete "$SMPROGRAMS\WaveType\Uninstall WaveType.lnk"
+    RMDir "$SMPROGRAMS\WaveType"
     DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\WaveType"
     DeleteRegKey HKCU "Software\WaveType"
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "WaveType"
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "STT Core"
   ${EndIf}
-  !include "build\uninstall-files.nsh"
-  Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
+  !insertmacro ReleaseMaintenance
 SectionEnd

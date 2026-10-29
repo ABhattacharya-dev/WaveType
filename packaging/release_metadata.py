@@ -98,8 +98,11 @@ def manifest(bundle, version):
     def escape(text):
         return text.replace("$", "$$").replace('"', '$\\"')
 
-    lines = [f'Delete "$INSTDIR\\{escape(row["path"].replace("/", chr(92)))}"' for row in files]
-    lines.append('Delete "$INSTDIR\\install-manifest.json"')
+    lines = []
+    for relative in [row["path"] for row in files] + ["install-manifest.json"]:
+        target = '$INSTDIR\\' + escape(relative.replace('/', chr(92)))
+        lines.extend([f'IfFileExists "{target}" 0 +4', f'Delete "{target}"',
+                      f'IfFileExists "{target}" 0 +2', 'StrCpy $RemovalFailed 1'])
     directories = sorted((path.relative_to(bundle) for path in bundle.rglob("*") if path.is_dir()),
                          key=lambda path: len(path.parts), reverse=True)
     lines.extend(f'RMDir "$INSTDIR\\{escape(str(path))}"' for path in directories)
