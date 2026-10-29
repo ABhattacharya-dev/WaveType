@@ -31,7 +31,10 @@ Exit before installing, upgrading or uninstalling. Active recording stops
 without inserting unfinished speech. Setup offers Retry or Cancel if files
 remain in use; it never silently force-closes the app.
 
-The published beta 1 preview is unsigned. Future releases can be signed using
+This beta 1.01 preview is unsigned. SmartScreen warnings still occur.
+The maintainer reports that Run anyway is available on their machine;
+this may differ on other PCs and is not a SmartScreen fix.
+Future releases can be signed using
 a publicly trusted certificate, but clean-machine validation and a Defender
 scan of the final package are still required. A clean antivirus result and
 absence of SmartScreen warnings are not guaranteed.

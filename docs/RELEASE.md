@@ -1,6 +1,8 @@
 # Windows x64 releases
 
-The published WaveType 0.1.0-beta.1 is an unsigned public prerelease for Intel/AMD x64 Windows 10/11. It contains the desktop UI and a separate engine, including Python and the fallback Parakeet CLI. The changes in this source tree move model downloads to the app after installation; they are not yet a published signed release. No Python or CUDA Toolkit installation is required from the user.
+WaveType **0.1.0-beta1.01** is an unsigned Windows x64 prerelease, following `0.1.0-beta.1`. It includes Python, the desktop app and engine; no separate Python or CUDA Toolkit installation is needed. [Download the release](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta1.01) or read the [short changes](releases/0.1.0-beta1.01.md).
+
+SmartScreen warnings remain. The maintainer reports that “Run anyway” is available on their machine; this is an observed result, not a guarantee for other devices or evidence of trusted signing. This release does not fix SmartScreen reputation. Keep Windows security protections enabled.
 
 The source tree targets **0.1.0-beta1.01**. The NSIS wizard includes welcome and privacy/notices pages, shortcut/startup choices, an installation-directory picker, installation progress, and a finish page with launch and developer-page checkboxes. Startup and the developer link are not preselected. The app downloads Parakeet on first launch; Qwen remains optional and disabled until the user enables it. Settings shows disk usage, relevant download controls, verification/repair and model deletion. Previously downloaded Qwen runtimes remain usable offline; Verify / repair creates current verification receipts. Pause, cancel and intentional deletion survive restart.
 
@@ -32,7 +34,7 @@ Before a stable release, validate clean Windows 10/11 systems with no Python or 
 
 Publish immutable artifacts, their checksums, source tag, version and honest validation status. The current app opens the GitHub releases page on demand; automatic update installation is not implemented. A future updater must verify the installer hash and trusted Authenticode signature before launching it.
 
-WaveType project code is licensed under MIT (see LICENSE). Third-party notices remain in LICENSES.md and licenses/. Lordicon PRO redistribution still requires the asset owner's applicable rights. The published 0.1.0-beta.1 installer predates the project-license update; future installer builds include LICENSE with the bundled notices.
+WaveType project code is licensed under MIT (see LICENSE). Third-party notices remain in LICENSES.md and licenses/. Lordicon PRO redistribution still requires the asset owner's applicable rights. The published 0.1.0-beta.1 installer predates the project-license update; this release includes LICENSE with the bundled notices.
 
 
 ## Windows Settings integration

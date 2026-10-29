@@ -8,16 +8,16 @@ WaveType is a local dictation app for Windows 10 and 11. A floating pill and a *
 
 [![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&logoColor=white)](#download-and-install) [![Latest release](https://img.shields.io/github/v/release/ABhattacharya-dev/WaveType?include_prereleases&label=release)](https://github.com/ABhattacharya-dev/WaveType/releases) [![GitHub issues](https://img.shields.io/github/issues/ABhattacharya-dev/WaveType)](https://github.com/ABhattacharya-dev/WaveType/issues) [![License: MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 
-[Download the Windows preview](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta.1) · [See how it works](#how-to-dictate) · [Contribute](#contributing)
+[Download the Windows preview](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta1.01) · [See how it works](#how-to-dictate) · [Contribute](#contributing)
 
 > [!NOTE]
-> The current Windows x64 release is **0.1.0 beta 1**. It is unsigned and has not yet been validated on a clean Windows installation or with Microsoft Defender. Keep Windows security protections enabled; see [release status](docs/RELEASE.md).
+> The current Windows x64 release is **0.1.0-beta1.01**. It is unsigned and has not yet been validated on a clean Windows installation or with Microsoft Defender. SmartScreen warnings still occur; the maintainer reports that “Run anyway” is now available on their machine. This is not a signing or SmartScreen fix, and other PCs may behave differently. Keep Windows security protections enabled; see [release status](docs/RELEASE.md).
 
 ## Why WaveType?
 
 | | |
 | --- | --- |
-| **Local transcription** | Parakeet Redux transcribes on your machine. Speech is not uploaded by WaveType; setup downloads verified model and runtime files. |
+| **Local transcription** | Parakeet Redux transcribes on your machine. Speech is not uploaded by WaveType; the app downloads verified model and runtime files after installation. |
 | **Dictate into other apps** | Hold **Ctrl+Win** to record and release to insert text into the focused text box. A quick tap locks recording for hands-free speech. |
 | **Optional Smart cleanup** | Qwen3 4B can improve punctuation and grammar, resolve spoken corrections, or format requested JSON. It runs locally and is off by default. |
 | **Personal vocabulary** | Add recognition aliases and deliberate snippets for names, addresses, and phrases. |
@@ -44,14 +44,14 @@ WaveType is a local dictation app for Windows 10 and 11. A floating pill and a *
 
 ## Download and install
 
-1. Download **`WaveType-0.1.0-beta.1-Setup-x64.exe`** from the [beta 1 release](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta.1). The release also provides SHA-256 checksums.
+1. Download **`WaveType-0.1.0-beta1.01-Setup-x64.exe`** from the [beta 1.01 release](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta1.01). The release also provides SHA-256 checksums.
 2. Run the installer on **Intel/AMD x64 Windows 10 or 11**. Python is included; no separate Python or CUDA Toolkit install is needed.
 3. Choose your installation folder and shortcuts. Startup on sign-in is off by default.
 4. Launch WaveType to download Parakeet; manage optional Qwen in Settings.
 
 Installation finishes before model downloads. On first launch, WaveType downloads Parakeet; Qwen remains optional. Settings shows Download, Pause / Resume, Cancel, Verify / repair and Delete model controls when relevant, with progress and per-model disk usage.
 
-The source tree and local development installer now target **0.1.0-beta1.01**; the beta 1 link above is the previously published release. Exit WaveType from the tray before upgrading or uninstalling. Setup checks for files still in use and offers Retry or Cancel; it never force-closes the app. Older uninstallers cannot be updated retroactively: install beta 1.01 to get the new uninstall choices.
+The current preview is **0.1.0-beta1.01**. See the [short release notes](docs/releases/0.1.0-beta1.01.md) for changes since beta 1. Exit WaveType from the tray before upgrading or uninstalling. Setup checks for files still in use and offers Retry or Cancel; it never force-closes the app. Older uninstallers cannot be updated retroactively: install beta 1.01 to get the new uninstall choices.
 
 Deleting a model removes its downloaded weights, runtimes, cached archives, partial files and verification records. Qwen deletion includes both CPU and GPU runtimes and turns off Smart cleanup. Parakeet deletion makes dictation unavailable until you download it again. Pause, Cancel and intentional deletion are remembered across restarts. The other model and your history, settings and dictionary are preserved. Progress bars appear only while downloading, paused, verifying, deleting, or completing a pause/cancel request.
 
@@ -109,7 +109,7 @@ Aliases correct known misrecognitions after transcription; they do not change Pa
 
 WaveType has no telemetry or speech-upload path in the reviewed application source. Parakeet runs locally; optional Qwen cleanup and the engine's authenticated IPC bind to `127.0.0.1`. Setup fetches missing models and runtimes over HTTPS and checks pinned SHA-256 hashes. An app receiving inserted text may independently sync it.
 
-History stores the final text, date/time, and foreground app name as readable local JSON. Installed-app models, settings, dictionaries, history, and logs live under `%LOCALAPPDATA%\STTCore` and remain after uninstall; delete that folder manually if you also want to remove local data. Read the full [privacy notes](docs/PRIVACY.md).
+History stores the final text, date/time, and foreground app name as readable local JSON. Installed-app models, settings, dictionaries, history, and logs live under `%LOCALAPPDATA%\STTCore` and are kept by default during uninstall. Select **Also delete all local data** to remove them for a fresh installation. Read the full [privacy notes](docs/PRIVACY.md).
 
 ## Accessibility
 
@@ -159,4 +159,4 @@ These documents and templates are available to contributors:
 
 ## License and credits
 
-WaveType project code is licensed under the [MIT License](LICENSE). Third-party models, runtimes, fonts, and artwork retain their own terms; see [third-party notices](LICENSES.md). The published beta 1 installer predates this license update; future installer builds include the project license text.
+WaveType project code is licensed under the [MIT License](LICENSE). Third-party models, runtimes, fonts, and artwork retain their own terms; see [third-party notices](LICENSES.md). The original beta 1 installer predates this licence update; beta 1.01 includes the project licence text.
