@@ -58,6 +58,7 @@ Page custom OptionsCreate OptionsLeave
 !define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
+UninstPage custom un.DataOptionsCreate un.DataOptionsLeave
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_UNPAGE_FINISH
 !insertmacro MUI_LANGUAGE "English"
@@ -69,6 +70,8 @@ Var StartupBox
 Var StartMenuChoice
 Var DesktopChoice
 Var StartupChoice
+Var DeleteDataBox
+Var DeleteDataChoice
 Var MaintenanceMutex
 Var UiLock
 Var EngineLock
@@ -146,6 +149,13 @@ Function un.onInit
   SetRegView 64
   StrCpy $UiLock -1
   StrCpy $EngineLock -1
+  StrCpy $DeleteDataChoice ${BST_UNCHECKED}
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/REMOVE-DATA" $1
+  ${IfNot} ${Errors}
+    StrCpy $DeleteDataChoice ${BST_CHECKED}
+  ${EndIf}
   System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\WaveTypeMaintenance") p .r0 ?e'
   Pop $1
   StrCpy $MaintenanceMutex $0
@@ -159,6 +169,22 @@ FunctionEnd
 
 Function un.CheckRunning
   !insertmacro CheckRunningBody
+FunctionEnd
+
+Function un.DataOptionsCreate
+  !insertmacro MUI_HEADER_TEXT "Keep your local data?" "Exit WaveType from the tray before continuing. Active recording will stop."
+  nsDialogs::Create 1018
+  Pop $Dialog
+  ${NSD_CreateCheckbox} 0 5u 100% 16u "Also delete all local data"
+  Pop $DeleteDataBox
+  ${NSD_SetState} $DeleteDataBox $DeleteDataChoice
+  ${NSD_CreateLabel} 0 30u 100% 80u "Leave unchecked to keep models, partial downloads, settings, dictionaries, history and logs. Reinstalling restores this data.$\r$\n$\r$\nSelect to remove %LOCALAPPDATA%\STTCore for a fresh installation. Data in custom locations is not removed."
+  Pop $0
+  nsDialogs::Show
+FunctionEnd
+
+Function un.DataOptionsLeave
+  ${NSD_GetState} $DeleteDataBox $DeleteDataChoice
 FunctionEnd
 
 !macro ReleaseMaintenance
@@ -296,6 +322,18 @@ Section "Uninstall"
   System::Call 'kernel32::CloseHandle(p $EngineLock)'
   StrCpy $UiLock -1
   StrCpy $EngineLock -1
+  ${If} $DeleteDataChoice == ${BST_CHECKED}
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\maintenance.ps1" -Action RemoveData'
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+      DetailPrint "Data removal failed: $1"
+      IfSilent +2
+      MessageBox MB_ICONSTOP|MB_OK "Some local data could not be removed from $LOCALAPPDATA\STTCore. The uninstall entry was kept so you can retry.$\r$\n$1"
+      SetErrorLevel 3
+      Abort
+    ${EndIf}
+  ${EndIf}
   Delete "$INSTDIR\Uninstall.exe"
   IfFileExists "$INSTDIR\Uninstall.exe" 0 +4
     DetailPrint "Could not remove Uninstall.exe; registration was kept."
