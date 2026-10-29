@@ -49,26 +49,44 @@ def wav_bytes(pcm, rate=SAMPLE_RATE):
 
 
 class ParakeetASR:
-    def __init__(self, executable=stt.RUNTIME / "parakeet-cli.exe", model=stt.RUNTIME / "redux-q8_0.gguf", threads=8):
+    def __init__(self, executable=stt.RUNTIME / "parakeet-cli.exe", model=stt.RUNTIME / "redux-q8_0.gguf", threads=8, job=None):
         self.executable, self.model, self.threads = Path(executable), Path(model), threads
+        self.job = job
 
     def transcribe(self, pcm, rate):
         if not self.executable.is_file() or not self.model.is_file():
             raise FileNotFoundError("Parakeet runtime or model missing")
-        result = subprocess.run([str(self.executable), "transcribe", "--model", str(self.model),
-                                 "--input", "-", "--threads", str(self.threads)],
-                                input=wav_bytes(pcm, rate), capture_output=True, timeout=90,
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if result.returncode:
-            raise RuntimeError(result.stderr.decode(errors="replace").strip() or "Parakeet failed")
-        return apply_vocabulary(result.stdout.decode(errors="replace").strip())
+        with subprocess.Popen([str(self.executable), "transcribe", "--model", str(self.model),
+                               "--input", "-", "--threads", str(self.threads)],
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as process:
+            try:
+                if self.job:
+                    self.job.assign(process.pid)
+                output, error = process.communicate(wav_bytes(pcm, rate), timeout=90)
+            except BaseException:
+                process.kill()
+                process.communicate()
+                raise
+            if process.returncode:
+                raise RuntimeError(error.decode(errors="replace").strip() or "Parakeet failed")
+        return apply_vocabulary(output.decode(errors="replace").strip())
 
 
 class ParakeetLibraryASR:
     """One loaded model context reused for every recording."""
 
     def __init__(self, library, model=stt.RUNTIME / "redux-q8_0.gguf"):
+        self.lock = threading.Lock()
+        self.context = None
         self.dll = ctypes.CDLL(str(library))
+        try:
+            self._initialize(model)
+        except BaseException:
+            self.close()
+            raise
+
+    def _initialize(self, model):
         self.dll.parakeet_capi_abi_version.restype = ctypes.c_int
         if self.dll.parakeet_capi_abi_version() != 10:
             raise OSError("unsupported Parakeet library ABI")
@@ -82,7 +100,6 @@ class ParakeetLibraryASR:
         self.dll.parakeet_capi_last_error.restype = ctypes.c_char_p
         self.dll.parakeet_capi_free_string.argtypes = [ctypes.c_void_p]
         self.dll.parakeet_capi_free.argtypes = [ctypes.c_void_p]
-        self.lock = threading.Lock()
         self.context = self.dll.parakeet_capi_load(os.fsencode(model))
         if not self.context:
             raise OSError(self.dll.parakeet_capi_load_error().decode(errors="replace"))
@@ -107,6 +124,14 @@ class ParakeetLibraryASR:
             if self.context:
                 self.dll.parakeet_capi_free(self.context)
                 self.context = None
+            if self.dll is not None:
+                # ctypes does not unload CDLL handles automatically. Drop all function
+                # references after freeing the context, then release our LoadLibrary ref.
+                handle = self.dll._handle
+                self.dll = None
+                if os.name == "nt":
+                    import _ctypes
+                    _ctypes.FreeLibrary(handle)
 
 
 def cleanup_needed(text):
@@ -148,8 +173,7 @@ def meaning_guard(raw, cleaned):
 class DictationEngine:
     def __init__(self, asr=None, capture=True, hotkey=False):
         if asr is None:
-            from model_manager import ensure_asr
-            self.asr_library = ensure_asr()
+            self.asr_library = None
             self.asr = None
         else:
             self.asr_library = None
@@ -167,6 +191,7 @@ class DictationEngine:
         self.cleaner_future = None
         self.cleaner_used = 0
         self.pending = []
+        self.processing_thread = None
         self.segment = []
         self.level = 0.0
         self.noise = 100.0
@@ -183,6 +208,7 @@ class DictationEngine:
         self.rate = SAMPLE_RATE
         self.capture_rate = SAMPLE_RATE
         self.microphone = None
+        self.capture_error = ""
         self.language = "auto"
         self.start_time = 0.0
         self.foreground = None
@@ -190,9 +216,18 @@ class DictationEngine:
         self.insert = False
         self.replaying = False
         self.record_history = True
-        self.job = None if os.getenv("STT_ENGINE_PARENT_JOB") == "1" else ChildJob()
+        self.job = None if os.getenv("STT_ENGINE_PARENT_JOB") == "1" else ChildJob(assign_self=False)
         if capture:
-            self._start_capture()
+            try:
+                self._start_capture()
+            except (OSError, ValueError, sd.PortAudioError) as exc:
+                self.capture_error = f"Microphone unavailable: {exc}. Select a working input in Settings."
+                logging.warning(self.capture_error)
+        self.models = None
+        if asr is None:
+            from model_manager import ModelDownloads
+            self.models = ModelDownloads(self._model_event, tier=lambda: self.tier,
+                                         release=self._release_model)
         self.hotkey = None
         self.hotkey_enabled = False
         self.hotkey_events = queue.Queue()
@@ -203,6 +238,41 @@ class DictationEngine:
             self._enable_hotkey()
         threading.Thread(target=self._idle_loop, daemon=True).start()
         threading.Thread(target=self._level_loop, daemon=True).start()
+        if self.models:
+            self.models.startup("asr")
+            self.models.startup("cleanup")
+
+    def _release_model(self, name):
+        # Called by the model worker, never while the command holds the engine lock.
+        with self.lock:
+            futures = ([self.asr_future, *self.asr_jobs] if name == "asr" else [self.cleaner_future])
+        for future in futures:
+            if future:
+                try:
+                    future.result()
+                except Exception:
+                    pass
+        with self.lock:
+            if name == "asr":
+                asr = self.asr
+                if self.asr_future and not self.asr_future.cancelled() and self.asr_future.exception() is None:
+                    asr = self.asr_future.result()
+                if hasattr(asr, "close"):
+                    asr.close()
+                self.asr = self.asr_future = None
+            else:
+                if self.cleaner:
+                    self.cleaner.close()
+                self.cleaner = self.cleaner_future = None
+
+    def _model_event(self, event):
+        if event["model"] == "asr":
+            if event["state"] == "ready":
+                from model_manager import ASR_LIBRARY_PATH
+                self.asr_library = ASR_LIBRARY_PATH
+            elif event["state"] != "ready":
+                self.asr_library = None
+        self.emit(event["event"], {key: value for key, value in event.items() if key != "event"})
 
     def _start_capture(self):
         device = sd.query_devices(self.microphone, kind="input")
@@ -281,7 +351,7 @@ class DictationEngine:
             return ParakeetLibraryASR(self.asr_library)
         except (OSError, ValueError) as exc:
             logging.warning("Parakeet library unavailable, using CLI: %s", exc)
-            return ParakeetASR()
+            return ParakeetASR(job=self.job)
 
     def _warm_asr(self):
         self.asr_used = time.monotonic()
@@ -340,9 +410,12 @@ class DictationEngine:
 
     def _ensure_cleaner(self):
         if self.cleaner is None:
+            if self.models and (self.models.snapshot()["cleanup"]["state"] != "ready" or
+                                not self.models._ready("cleanup")):
+                raise ValueError("Qwen model unavailable. Download or repair it in Settings first.")
             from model_manager import ensure_cleanup
             executable, layers = ensure_cleanup(cpu_only=self.tier == "cpu")
-            cleaner = smart.SmartCleanup(gpu_layers=layers, executable=executable)
+            cleaner = smart.SmartCleanup(gpu_layers=layers, executable=executable, job=self.job)
             try:
                 cleaner.start()
             except (OSError, TimeoutError):
@@ -350,7 +423,7 @@ class DictationEngine:
                 if layers == 0:
                     raise
                 cpu = smart.RUNTIME / "smart-cpu" / "llama-server.exe"
-                cleaner = smart.SmartCleanup(gpu_layers=0, executable=cpu if cpu.exists() else executable)
+                cleaner = smart.SmartCleanup(gpu_layers=0, executable=cpu if cpu.exists() else executable, job=self.job)
                 cleaner.start()
             self.cleaner = cleaner
         self.cleaner_used = time.monotonic()
@@ -375,6 +448,8 @@ class DictationEngine:
 
     def command(self, name, args):
         with self.lock:
+            if self.stopping.is_set() and name not in ("status", "model_status"):
+                raise ValueError("WaveType is shutting down. Wait for it to exit.")
             if name == "status":
                 return {"state": self.state, "mode": self.mode, "level": self.level,
                         "tap_threshold_ms": self.tap_threshold_ms, "hotkey": self.hotkey_enabled,
@@ -383,16 +458,55 @@ class DictationEngine:
                                         self.asr_future.done() else "Parakeet (unloaded)" if self.asr_library else
                                         type(self.asr).__name__), "capture_ready": self.stream is not None,
                         "smart": self.smart_enabled, "tier": self.tier, "microphone": self.microphone,
+                        "capture_error": self.capture_error,
                         "language": self.language}
             if name == "devices":
-                return [{"index": index, "name": device["name"]} for index, device in
-                        enumerate(sd.query_devices()) if device["max_input_channels"] > 0]
+                try:
+                    return [{"index": index, "name": device["name"]} for index, device in
+                            enumerate(sd.query_devices()) if device["max_input_channels"] > 0]
+                except (OSError, sd.PortAudioError):
+                    return []
+            if name == "capture_retry":
+                if self.state != "idle":
+                    raise ValueError("Finish the current dictation before retrying the microphone.")
+                if self.stream is None:
+                    try:
+                        self._start_capture()
+                        self.capture_error = ""
+                    except (OSError, ValueError, sd.PortAudioError) as exc:
+                        self.capture_error = f"Microphone unavailable: {exc}. Select a working input in Settings."
+                        raise ValueError(self.capture_error) from exc
+                return {"capture_ready": True, "capture_error": ""}
             if name == "model_status":
                 from model_manager import gpu_available, free_memory_gb
-                return {"asr_installed": (stt.RUNTIME / "redux-q8_0.gguf").is_file(),
-                        "cleanup_installed": smart.MODEL.is_file(), "gpu_available": gpu_available(),
+                models = self.models.snapshot() if self.models else {}
+                return {"models": models,
+                        "asr_installed": models.get("asr", {}).get("state") == "ready",
+                        "cleanup_installed": models.get("cleanup", {}).get("state") == "ready",
+                        "gpu_available": gpu_available(),
                         "free_memory_gb": round(free_memory_gb(), 1), "language": "Automatic (25 languages)",
-                        "tier": self.tier}
+                        "tier": self.tier, "capture_error": self.capture_error}
+            if name == "model_download":
+                if self.state != "idle":
+                    raise ValueError("Finish the current dictation before repairing a model.")
+                return self.models.start(args.get("model"), repair=bool(args.get("repair", False)))
+            if name == "model_verify":
+                if self.state != "idle":
+                    raise ValueError("Finish the current dictation before verifying a model.")
+                return self.models.start(args.get("model"), download=False)
+            if name == "model_stop":
+                return self.models.stop(args.get("model"), args.get("action"))
+            if name == "model_delete":
+                if self.state != "idle":
+                    raise ValueError("Finish or cancel the current dictation before deleting a model.")
+                model = args.get("model")
+                if model not in ("asr", "cleanup"):
+                    raise ValueError("unknown model")
+                result = self.models.delete(model)
+                if model == "cleanup":
+                    self.smart_enabled = False
+                    self.emit("cleanup_disabled", {})
+                return result
             if name == "dictionary_get":
                 return dictionary_get(stt.TERMS_FILE, VOCABULARY)
             if name == "dictionary_set":
@@ -408,6 +522,15 @@ class DictationEngine:
                     self.hotkey_enabled = False
                     return {"mode": self.mode, "tap_threshold_ms": self.tap_threshold_ms,
                             "smart": self.smart_enabled, "tier": self.tier, "hotkey": False}
+                requested_tier = args.get("tier", self.tier)
+                requested_smart = args.get("smart", self.smart_enabled)
+                if requested_smart and self.models and self.models.snapshot()["cleanup"]["state"] in ("deleting", "downloading", "verifying", "pausing", "canceling"):
+                    raise ValueError("Wait for the Qwen model operation to finish.")
+                if (requested_tier != self.tier and self.models and
+                        self.models.snapshot()["cleanup"]["state"] in ("downloading", "verifying")):
+                    raise ValueError("Pause the Qwen download before changing hardware tier.")
+                if requested_smart and self.models and not self.models._ready("cleanup", requested_tier):
+                    raise ValueError("Qwen model unavailable for this hardware tier. Download it in Settings first.")
                 if "mode" in args:
                     if args["mode"] not in ("hold", "tap", "hybrid"):
                         raise ValueError("mode must be hold, tap, or hybrid")
@@ -425,7 +548,10 @@ class DictationEngine:
                     if args["tier"] != self.tier and self.cleaner:
                         self.cleaner.close()
                         self.cleaner = None
+                    tier_changed = args["tier"] != self.tier
                     self.tier = args["tier"]
+                    if tier_changed and self.models:
+                        self.models.start("cleanup", download=False)
                 if "language" in args:
                     if args["language"] != "auto":
                         raise ValueError("this Parakeet adapter detects its supported languages automatically")
@@ -441,7 +567,12 @@ class DictationEngine:
                             self.stream.close()
                             self.stream = None
                         self.microphone = microphone
-                        self._start_capture()
+                        try:
+                            self._start_capture()
+                            self.capture_error = ""
+                        except (OSError, ValueError, sd.PortAudioError) as exc:
+                            self.capture_error = f"Microphone unavailable: {exc}. Select a working input in Settings."
+                            raise ValueError(self.capture_error) from exc
                 if "hotkey" in args:
                     self.hotkey_enabled = bool(args["hotkey"])
                     if self.hotkey_enabled:
@@ -458,14 +589,27 @@ class DictationEngine:
                         "language": self.language}
             click = name == "toggle"
             if name in ("start", "press", "toggle"):
+                if self.models and any(v["state"] in ("deleting", "pausing", "canceling") or
+                                       (key == "cleanup" and self.smart_enabled and v["state"] in ("downloading", "verifying"))
+                                       for key, v in self.models.snapshot().items()):
+                    raise ValueError("Wait for the model operation to finish.")
                 if self.state == "locked" and (self.mode in ("tap", "hybrid") or click):
                     return self._finish()
                 if click and self.state == "recording":
                     return self._finish()
                 if self.state != "idle":
                     raise ValueError("engine is busy")
+                if self.models and self.models.snapshot()["asr"]["state"] != "ready":
+                    raise ValueError("Model unavailable. Open Settings to download Parakeet Redux.")
+                if self.smart_enabled and self.models and self.models.snapshot()["cleanup"]["state"] != "ready":
+                    raise ValueError("Qwen model unavailable. Download or repair it in Settings first.")
                 if self.stream is None:
-                    self._start_capture()
+                    try:
+                        self._start_capture()
+                        self.capture_error = ""
+                    except (OSError, ValueError, sd.PortAudioError) as exc:
+                        self.capture_error = f"Microphone unavailable: {exc}. Select a working input in Settings."
+                        raise ValueError(self.capture_error) from exc
                 self._warm_asr()
                 self.rate = self.capture_rate
                 self.replaying = False
@@ -498,6 +642,9 @@ class DictationEngine:
                 self._state("idle")
                 return {"state": self.state}
             if name == "replay":
+                if self.models and (self.models.snapshot()["asr"]["state"] != "ready" or
+                                    any(v["state"] == "deleting" for v in self.models.snapshot().values())):
+                    raise ValueError("Model unavailable. Wait for model setup to finish.")
                 if self.state != "idle":
                     raise ValueError("engine is busy")
                 source = Path(args["path"]).resolve()
@@ -533,7 +680,8 @@ class DictationEngine:
         release_at = time.perf_counter()
         self.recording_ms = round((release_at - self.start_time) * 1000, 1)
         self._state("processing")
-        threading.Thread(target=self._process, args=(futures, release_at), daemon=True).start()
+        self.processing_thread = threading.Thread(target=self._process, args=(futures, release_at), daemon=True)
+        self.processing_thread.start()
         return {"state": "processing"}
 
     def _process(self, futures, release_at):
@@ -566,7 +714,7 @@ class DictationEngine:
                 timings["cleanup_ms"] = round((time.perf_counter() - start) * 1000, 1)
             else:
                 timings["cleanup_ms"] = 0.0
-            if self.insert and final:
+            if self.insert and final and not self.stopping.is_set():
                 start = time.perf_counter()
                 try:
                     if not self.target_window:
@@ -597,18 +745,31 @@ class DictationEngine:
                 self._state("idle")
 
     def close(self):
+        if getattr(self, "closed", False):
+            return
+        self.closed = True
         self.hotkey_enabled = False
         self.stopping.set()
         self.level_wakeup.set()
         self.hotkey_events.put(None)
         with self.lock:
-            if self.stream:
-                self.stream.stop()
-                self.stream.close()
+            self.insert = False
+            self.segment.clear()
+            stream, self.stream = self.stream, None
+        if stream:
+            stream.stop()
+            stream.close()
+        if self.models:
+            self.models.close()
+        self.executor.shutdown(wait=True)
+        if self.processing_thread:
+            self.processing_thread.join()
+        with self.lock:
             if self.cleaner:
                 self.cleaner.close()
-            self.executor.shutdown(wait=True, cancel_futures=True)
-            asr = self.asr_future.result() if self.asr_future else self.asr
+            asr = self.asr
+            if self.asr_future and self.asr_future.exception() is None:
+                asr = self.asr_future.result()
             if hasattr(asr, "close"):
                 asr.close()
             if self.job:
@@ -635,6 +796,8 @@ class IPCHandler(socketserver.StreamRequestHandler):
                     send({"id": message.get("id"), "ok": True})
                 else:
                     result = self.server.engine.command(message["command"], message.get("args", {}))
+                    if message["command"] == "shutdown":
+                        self.server.engine.close()
                     send({"id": message.get("id"), "ok": True, "result": result})
                     if message["command"] == "shutdown":
                         threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -653,6 +816,9 @@ class IPCServer(socketserver.ThreadingTCPServer):
 
 
 def serve(capture=True, hotkey=False):
+    import maintenance
+    if maintenance.active():
+        raise RuntimeError("WaveType setup is open. Finish or close setup before starting the engine.")
     APP_DIR.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
         import msvcrt

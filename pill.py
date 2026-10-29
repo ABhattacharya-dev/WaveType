@@ -378,8 +378,23 @@ class Pill:
         commands = events = None
         try:
             commands = EngineClient(start=True, job=self.engine_job)
-            commands.command("settings", mode="hybrid", smart=smart,
-                             tap_threshold_ms=threshold, hotkey=True, **settings)
+            settings = settings.copy()
+            for _attempt in range(3):
+                try:
+                    commands.command("settings", mode="hybrid", smart=smart,
+                                     tap_threshold_ms=threshold, hotkey=True, **settings)
+                    break
+                except RuntimeError as exc:
+                    if smart and "Qwen model unavailable" in str(exc):
+                        smart = False
+                    elif settings.get("microphone") is not None and "unknown microphone" in str(exc):
+                        settings["microphone"] = None
+                        self.messages.put({"event": "error", "message":
+                                           "Saved microphone unavailable; using the default input."})
+                        continue
+                    else:
+                        raise
+                    self.messages.put({"event": "error", "message": str(exc)})
             events = EngineClient()
             events.command("subscribe")
             self.messages.put({"event": "state", "value": commands.command("status")["state"]})

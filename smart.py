@@ -119,11 +119,12 @@ def validate_output(text, values, json_mode=False):
 
 
 class SmartCleanup:
-    def __init__(self, model=MODEL, gpu_layers=99, executable=None):
+    def __init__(self, model=MODEL, gpu_layers=99, executable=None, job=None):
         self.model = Path(model)
         self.gpu_layers = gpu_layers
         self.executable = Path(executable) if executable else RUNTIME / "smart" / "llama-server.exe"
         self.process = None
+        self.job = job
         self.key = secrets.token_hex(16)
         self.http = build_opener(ProxyHandler({}))
 
@@ -154,6 +155,12 @@ class SmartCleanup:
             "--no-webui",
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if self.job:
+            try:
+                self.job.assign(self.process.pid)
+            except Exception:
+                self.close()
+                raise
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
