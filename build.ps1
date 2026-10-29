@@ -1,4 +1,9 @@
-param([string]$Version = '0.1.0-beta.1')
+param(
+    [string]$Version = '0.1.0-beta1.01',
+    [switch]$Sign,
+    [string]$SignToolPath = 'signtool.exe',
+    [string]$TimestampUrl = 'http://timestamp.digicert.com'
+)
 
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -8,6 +13,20 @@ if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$') { throw 'Use a sem
 $python = Join-Path $project '.venv\Scripts\python.exe'
 $pyinstaller = Join-Path $project '.venv\Scripts\pyinstaller.exe'
 $makensis = 'C:\Program Files (x86)\NSIS\makensis.exe'
+if ($Sign) {
+    $signtool = (Get-Command $SignToolPath -ErrorAction Stop).Source
+    $thumbprint = $env:WAVETYPE_SIGN_CERT_THUMBPRINT
+    if ($thumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
+        throw 'Set WAVETYPE_SIGN_CERT_THUMBPRINT to the trusted code-signing certificate thumbprint.'
+    }
+}
+
+function Sign-OwnedFile([string]$Path) {
+    & $signtool sign /sha1 $thumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 $Path
+    if ($LASTEXITCODE -ne 0) { throw "Signing failed: $Path" }
+    & $signtool verify /pa /v $Path
+    if ($LASTEXITCODE -ne 0) { throw "Signature verification failed: $Path" }
+}
 if (-not (Test-Path -LiteralPath $python)) { throw 'Create .venv first.' }
 if (-not (Test-Path -LiteralPath $pyinstaller)) { throw 'Install requirements-build.txt in .venv first.' }
 if (-not (Test-Path -LiteralPath $makensis)) { throw 'Install NSIS 3 first.' }
@@ -49,6 +68,10 @@ Copy-Item -LiteralPath $engineBundle -Destination $nested -Recurse
 Copy-Item -LiteralPath (Join-Path $project 'LICENSES.md') -Destination $bundle
 Copy-Item -LiteralPath (Join-Path $project 'licenses') -Destination (Join-Path $bundle 'licenses') -Recurse
 Copy-Item -LiteralPath (Join-Path $project 'packaging\INSTALL-NOTICES.txt') -Destination $bundle
+if ($Sign) {
+    Sign-OwnedFile (Join-Path $bundle 'WaveType.exe')
+    Sign-OwnedFile (Join-Path $nested 'WaveTypeEngine.exe')
+}
 & $python packaging\release_metadata.py manifest --version $Version --bundle $bundle
 if ($LASTEXITCODE -ne 0) { throw 'Bundle manifest or privacy check failed.' }
 
@@ -56,7 +79,12 @@ $versionParts = ($Version.Split('-')[0].Split('.') + '0') -join '.'
 & $makensis /WX "/DAPP_VERSION=$Version" "/DFILE_VERSION=$versionParts" (Join-Path $project 'installer.nsi')
 if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
 $installer = Join-Path $project "dist\WaveType-$Version-Setup-x64.exe"
+if ($Sign) { Sign-OwnedFile $installer }
 $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
 "$hash  $([IO.Path]::GetFileName($installer))" | Set-Content -LiteralPath (Join-Path $project 'dist\SHA256SUMS.txt') -Encoding ascii
 Write-Output "Created $installer"
-Write-Output 'Unsigned build. Signing and clean-machine/Defender validation remain pending.'
+if ($Sign) {
+    Write-Output 'Signed build. Clean-machine and Defender validation remain release gates.'
+} else {
+    Write-Output 'Unsigned development build. Do not publish as a SmartScreen fix.'
+}
