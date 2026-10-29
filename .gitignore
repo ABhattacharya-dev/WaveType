@@ -10,6 +10,8 @@ runtime/smart-cpu/
 runtime/parakeet-lib/
 runtime/*.zip
 runtime/*.part
+runtime/model-intent.json
+runtime/model-intent.tmp
 benchmark-results*.json
 build/
 dist/

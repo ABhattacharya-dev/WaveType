@@ -254,7 +254,13 @@ class ModelDownloads:
         self.lock = threading.RLock()
         self.jobs = {}
         self.stops = {}
-        self.intents = {}
+        self.intent_path = stt.RUNTIME / "model-intent.json"
+        try:
+            self.intents = json.loads(self.intent_path.read_text(encoding="utf-8"))
+            if not isinstance(self.intents, dict):
+                self.intents = {}
+        except (OSError, ValueError):
+            self.intents = {}
         self.states = {name: {"state": "missing", "downloaded": 0, "total": 0,
                               "file": "", "error": "", "legacy": False, "operation": "",
                               "installed": False, "partial": False, "disk_bytes": 0}
@@ -263,6 +269,10 @@ class ModelDownloads:
     def _persist(self, name, intent):
         with self.lock:
             self.intents[name] = intent
+            self.intent_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.intent_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(self.intents), encoding="utf-8")
+            temporary.replace(self.intent_path)
 
     @staticmethod
     def owned_paths(name):
