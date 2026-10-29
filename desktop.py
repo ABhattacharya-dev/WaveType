@@ -8,7 +8,7 @@ import queue
 import subprocess
 import sys
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import webbrowser
 import winreg
 from ctypes import wintypes
@@ -21,6 +21,25 @@ from windows_support import ChildJob
 
 
 PREFERENCES = APP_DIR / "ui.json"
+
+
+def model_controls(value):
+    state = value.get("state", "missing")
+    if state in ("deleting", "pausing", "canceling"):
+        return ()
+    if state == "verifying":
+        return ("pause", "cancel") if value.get("operation") in ("download", "repair") else ()
+    if state == "downloading":
+        return ("pause", "cancel")
+    if state == "paused":
+        return ("resume", "cancel")
+    if state == "ready" or value.get("installed") or value.get("operation") == "delete":
+        return ("verify", "delete")
+    if value.get("partial"):
+        return ("resume", "cancel")
+    return ("download",)
+
+
 ASSETS = Path(__file__).resolve().parent / "assets"
 RELEASES = "https://github.com/ABhattacharya-dev/stt-core-structure/releases"
 LIGHT = {"bg": "#FFFFFF", "side": "#F4F4F2", "card": "#FFFFFF", "text": "#18181B",
@@ -164,6 +183,7 @@ class DesktopApp:
         self.dictionary = {"snippets": {}, "vocabulary": {}}
         self.devices = []
         self.model = {}
+        self.setup_error = ""
         self.engine_job = ChildJob(assign_self=False)
         self.pill = Pill(smart=bool(self.preferences.get("smart", False)),
                          tap_threshold_ms=int(self.preferences.get("tap_threshold_ms", 250)),
@@ -305,7 +325,7 @@ class DesktopApp:
         self.pill.closing = True
         if self.pill.ready:
             self.pill.request("shutdown", lambda _result, _error: self.finish_quit())
-            self.root.after(1500, self.finish_quit)
+            self.root.after(45000, self.finish_quit)
         else:
             self.finish_quit()
 
@@ -330,10 +350,16 @@ class DesktopApp:
 
     def receive_model(self, data, error):
         if error:
-            self.report(error)
+            self.setup_error = error
+            self.update_setup_issue()
             return
         else:
             self.model = data
+            self.setup_error = ""
+            self.update_model_cards()
+            self.update_setup_issue()
+            if hasattr(self, "microphone_status_label") and self.microphone_status_label.winfo_exists():
+                self.microphone_status_label.configure(text=data.get("capture_error") or "Microphone ready")
         if self.page == "Setup" and hasattr(self, "setup_tier_label"):
             tier = "NVIDIA GPU detected" if self.model.get("gpu_available") else "CPU mode available"
             self.setup_tier_label.configure(text=tier + " · Smart cleanup is optional")
@@ -345,7 +371,32 @@ class DesktopApp:
             return
         kind = event["event"]
         if kind == "error":
-            self.report(event["message"])
+            message = event["message"]
+            if "Qwen model unavailable" in message:
+                self.preferences["smart"] = False
+                self.tray_smart_var.set(False)
+                self.save_preferences()
+            if "Saved microphone unavailable" in message:
+                self.preferences["microphone"] = None
+                self.save_preferences()
+            if "Model unavailable" in message or "model unavailable" in message or "Microphone unavailable" in message:
+                self.setup_error = message
+                self.update_setup_issue()
+            else:
+                self.report(message)
+        elif kind == "model_progress":
+            self.model.setdefault("models", {})[event["model"]] = {
+                key: value for key, value in event.items() if key not in ("event", "model")}
+            self.update_model_cards()
+            if event["model"] == "asr" and event["state"] == "ready":
+                self.setup_error = ""
+            self.update_setup_issue()
+        elif kind == "cleanup_disabled":
+            self.preferences["smart"] = False
+            self.tray_smart_var.set(False)
+            if hasattr(self, "smart_var"):
+                self.smart_var.set(False)
+            self.save_preferences()
         elif kind == "history_added" and self.page == "History":
             self.refresh_page()
 
@@ -448,6 +499,11 @@ class DesktopApp:
         self.sidebar_engine_label.pack(fill="x", pady=(5, 0))
         if self.model:
             self.sidebar_engine_label.configure(text=self.engine_description())
+        self.issue_label = self.label(engine_card, "", 8, color="danger", wraplength=160,
+                                      justify="left")
+        self.issue_label.pack(fill="x", pady=(6, 0))
+        self.issue_button = self.button(engine_card, "Open Settings", lambda: self.navigate("Settings"))
+        self.update_setup_issue()
         about = tk.Frame(footer, bg=c["side"], cursor="hand2", height=34)
         about.pack(fill="x", padx=12)
         about.pack_propagate(False)
@@ -473,7 +529,26 @@ class DesktopApp:
         getattr(self, f"show_{self.page.lower()}")()
 
     def engine_description(self):
+        status = self.model.get("models", {}).get("asr", {}).get("state", "missing")
+        if status != "ready":
+            return "Parakeet Redux · " + status.capitalize()
         return "Parakeet Redux · " + ("GPU available" if self.model.get("gpu_available") else "CPU mode")
+
+    def update_setup_issue(self):
+        if not hasattr(self, "issue_label") or not self.issue_label.winfo_exists():
+            return
+        asr = self.model.get("models", {}).get("asr", {})
+        error = self.model.get("capture_error") or getattr(self, "setup_error", "")
+        if asr.get("state") in ("missing", "failed", "paused"):
+            error = "Model unavailable. Download Parakeet in Settings."
+            if asr.get("error"):
+                error += " " + asr["error"]
+        self.issue_label.configure(text=error)
+        if error:
+            if not self.issue_button.winfo_manager():
+                self.issue_button.pack(anchor="w", pady=(6, 0))
+        elif self.issue_button.winfo_manager():
+            self.issue_button.pack_forget()
 
     def style_nav(self, hover=None):
         for page, (row, icon, label) in self.nav_buttons.items():
@@ -520,17 +595,20 @@ class DesktopApp:
             self.pill.request("dictionary_get", self.receive_dictionary)
         elif self.page == "Settings":
             self.pill.request("devices", self.receive_devices)
+            self.pill.request("model_status", self.receive_model)
 
     def show_setup(self):
         box = tk.Frame(self.body, bg=self.colors["card"], padx=28, pady=25)
         box.pack(fill="x", pady=12)
         self.label(box, "Local dictation, ready for your text box", 16, weight="bold").pack(fill="x", pady=(0, 12))
-        self.label(box, "The engine downloads and verifies Parakeet Redux on first run. "
-                   "This may take several minutes. Future dictation works offline.", 11,
+        self.label(box, "Parakeet Redux downloads and verifies on first launch. "
+                   "Open Settings to see progress, pause, or retry. Qwen Smart cleanup is optional. "
+                   "Future dictation works offline after the download.", 11,
                    wraplength=560, justify="left").pack(fill="x", pady=(0, 16))
         tier = "NVIDIA GPU detected" if self.model.get("gpu_available") else "CPU mode available"
         self.setup_tier_label = self.label(box, tier + " · Smart cleanup is optional", 11, color="muted")
         self.setup_tier_label.pack(fill="x", pady=(0, 22))
+        self.button(box, "Open model settings", lambda: self.navigate("Settings")).pack(anchor="w", pady=(0, 10))
         self.button(box, "Continue to history", self.finish_setup, primary=True).pack(anchor="w")
 
     def finish_setup(self):
@@ -935,9 +1013,171 @@ class DesktopApp:
                 toggle.bind("<Destroy>", lambda _event, var=variable, token=trace:
                             var.trace_remove("write", token))
                 self.draw_toggle(toggle, variable.get())
+        self.microphone_status_label = self.label(
+            inside, self.model.get("capture_error") or "Microphone ready", 9, color="muted",
+            wraplength=540, justify="left")
+        self.microphone_status_label.pack(fill="x", pady=(16, 5))
+        self.button(inside, "Retry microphone", self.retry_microphone).pack(anchor="w")
+        self.model_widgets = {}
+        self.label(inside, "Local models", 13, weight="bold").pack(fill="x", pady=(22, 5))
+        self.label(inside, "Downloads are verified before use. Pause keeps the partial file; "
+                   "Cancel removes it.", 9, color="muted").pack(fill="x", pady=(0, 8))
+        for name, title, detail in (
+                ("asr", "Parakeet Redux", "Required for speech to text"),
+                ("cleanup", "Qwen Smart cleanup", "Optional; downloading does not enable it")):
+            card = tk.Frame(inside, bg=self.colors["card"], padx=16, pady=12,
+                            highlightbackground=self.colors["line"], highlightthickness=1)
+            card.pack(fill="x", pady=5)
+            self.label(card, title, 11, weight="bold").pack(fill="x")
+            self.label(card, detail, 9, color="muted").pack(fill="x", pady=(2, 7))
+            status = self.label(card, "Checking files…", 9, color="muted", wraplength=530,
+                                justify="left")
+            status.pack(fill="x")
+            bar = ttk.Progressbar(card, orient="horizontal", mode="determinate", maximum=100)
+            actions = tk.Frame(card, bg=self.colors["card"])
+            actions.pack(fill="x", pady=(8, 0))
+            start = self.button(actions, "Download", lambda model=name: self.model_action("model_download", model))
+            verify = self.button(actions, "Verify / repair", lambda model=name: self.model_action("model_download", model, repair=True))
+            pause = self.button(actions, "Pause", lambda model=name: self.model_action("model_stop", model, "pause"))
+            cancel = self.button(actions, "Cancel", lambda model=name: self.model_action("model_stop", model, "cancel"))
+            delete = self.button(actions, "Delete model", lambda model=name: self.delete_model(model))
+            for widget, icon in ((start, "download"), (verify, "repair"), (pause, "pause"),
+                                 (cancel, "cancel"), (delete, "delete")):
+                widget.configure(image=self.model_icon(icon), compound="left", takefocus=True,
+                                 highlightthickness=1, highlightcolor=self.colors["link"])
+            self.model_widgets[name] = (status, bar, start, verify, pause, cancel, delete, actions)
+        self.update_model_cards()
         self.label(inside, "Releases can be checked on GitHub. Dictation stays local.",
                    9, color="muted").pack(fill="x", pady=(20, 9))
         self.button(inside, "Open releases", lambda: webbrowser.open(RELEASES)).pack(anchor="w")
+
+    def model_action(self, command, model, action=None, repair=False):
+        if not self.pill.ready:
+            self.report("Engine is still starting. Try again shortly.")
+            return
+        if model in getattr(self, "model_pending", set()):
+            return
+        self.model_pending = getattr(self, "model_pending", set()) | {model}
+        self.update_model_cards()
+        arguments = {"model": model}
+        if action:
+            arguments["action"] = action
+        if repair:
+            arguments["repair"] = True
+        def finished(result, error):
+            self.model_pending.discard(model)
+            if error:
+                self.report(error)
+            elif result:
+                self.model.setdefault("models", {})[model] = result
+            self.update_model_cards()
+        self.pill.request(command, finished, **arguments)
+
+    def delete_model(self, model):
+        title = "Parakeet Redux" if model == "asr" else "Qwen Smart cleanup"
+        effect = ("Dictation will be unavailable until you download Parakeet again." if model == "asr"
+                  else "Smart cleanup will be turned off. Dictation with Parakeet will still work.")
+        if messagebox.askokcancel(f"Delete {title}?",
+                f"Remove {title}'s model weights, downloaded runtimes, verification records, "
+                "cached archives and partial downloads? "
+                + ("Both CPU and GPU runtimes are included. " if model == "cleanup" else "")
+                + f"\n\n{effect}\n\nYour other model, settings, dictionary and history are kept.",
+                icon="warning", parent=self.main):
+            self.model_action("model_delete", model)
+
+    def model_icon(self, name):
+        # Small monochrome line icons inherit the current theme and retain text labels.
+        cache = getattr(self, "model_icons", {})
+        self.model_icons = cache
+        key = (name, self.colors["text"])
+        if key not in cache:
+            paths = {
+                "download": [(8, 2, 8, 11), (4, 7, 8, 11), (8, 11, 12, 7), (2, 12, 2, 14), (2, 14, 14, 14), (14, 14, 14, 12)],
+                "resume": [(4, 2, 4, 14), (4, 2, 13, 8), (13, 8, 4, 14)],
+                "pause": [(5, 3, 5, 13), (11, 3, 11, 13)],
+                "cancel": [(3, 3, 13, 13), (3, 13, 13, 3)],
+                "repair": [(3, 5, 6, 2), (6, 2, 12, 3), (12, 3, 14, 7), (10, 7, 14, 7), (14, 7, 14, 3), (13, 11, 10, 14), (10, 14, 4, 13), (4, 13, 2, 9)],
+                "delete": [(3, 4, 13, 4), (6, 2, 10, 2), (4, 6, 5, 14), (5, 14, 11, 14), (11, 14, 12, 6), (7, 7, 7, 11), (9, 7, 9, 11)]}
+            icon = tk.PhotoImage(master=self.root, width=22, height=16)
+            for x1, y1, x2, y2 in paths[name]:
+                steps = max(abs(x2 - x1), abs(y2 - y1))
+                for step in range(steps + 1):
+                    icon.put(key[1], (round(x1 + (x2 - x1) * step / steps),
+                                      round(y1 + (y2 - y1) * step / steps)))
+            cache[key] = icon
+        return cache[key]
+
+    def retry_microphone(self):
+        if not self.pill.ready:
+            self.report("Engine is still starting. Try again shortly.")
+            return
+        def finished(_result, error):
+            if error:
+                self.model["capture_error"] = error
+                self.setup_error = error
+                self.update_setup_issue()
+                if self.microphone_status_label.winfo_exists():
+                    self.microphone_status_label.configure(text=error)
+            else:
+                self.model["capture_error"] = ""
+                self.setup_error = ""
+                self.update_setup_issue()
+                self.pill.request("devices", self.receive_devices)
+                if self.microphone_status_label.winfo_exists():
+                    self.microphone_status_label.configure(text="Microphone ready")
+        self.pill.request("capture_retry", finished)
+
+    def update_model_cards(self):
+        if hasattr(self, "sidebar_engine_label") and self.sidebar_engine_label.winfo_exists():
+            self.sidebar_engine_label.configure(text=self.engine_description() if self.model else "Checking model…")
+        for name, widgets in getattr(self, "model_widgets", {}).items():
+            status, bar, start, verify, pause, cancel, delete, actions = widgets
+            if not status.winfo_exists():
+                continue
+            value = self.model.get("models", {}).get(name, {})
+            state = value.get("state", "missing")
+            received, total = value.get("downloaded", 0), value.get("total", 0)
+            filename = value.get("file", "")
+            if state == "downloading":
+                amount = (f"{received // (1024 * 1024)} / {total // (1024 * 1024)} MiB"
+                          if total else f"{received // (1024 * 1024)} MiB")
+                label = f"Downloading {filename or 'files'} · {amount}"
+            elif state == "failed":
+                label = value.get("error") or "Model operation failed. Retry to repair it."
+            else:
+                label = {"ready": ("Ready (previous runtime; use Verify / repair for a full check)"
+                                    if value.get("legacy") else "Ready and verified"),
+                         "verifying": "Verifying files…",
+                         "paused": "Paused · Resume when ready", "missing": "Model unavailable",
+                         "pausing": "Pausing…", "canceling": "Canceling…", "deleting": "Deleting model files…"}.get(state, state)
+            disk = value.get("disk_bytes", 0)
+            size = "Disk usage unavailable" if disk is None else f"{disk / (1024 ** 3):.2f} GiB on disk" if disk >= 1024 ** 3 else f"{disk / (1024 ** 2):.1f} MiB on disk"
+            status.configure(text=f"{label}\n{size}")
+            bar.stop()
+            if state in ("downloading", "paused", "verifying", "deleting", "pausing", "canceling"):
+                bar.pack(fill="x", pady=(8, 2), before=actions)
+            else:
+                bar.pack_forget()
+            if state in ("verifying", "deleting", "pausing", "canceling") or state == "downloading" and not total:
+                bar.configure(mode="indeterminate")
+                bar.start(20)
+            else:
+                bar.configure(mode="determinate", value=100 * received / total if total else
+                              (100 if state == "ready" else 0))
+            visible = model_controls(value)
+            buttons = {"download": start, "resume": start, "verify": verify, "pause": pause,
+                       "cancel": cancel, "delete": delete}
+            focused = self.root.focus_get()
+            for widget in (start, verify, pause, cancel, delete):
+                widget.pack_forget()
+            start.configure(text="Resume" if "resume" in visible else "Download",
+                            image=self.model_icon("resume" if "resume" in visible else "download"))
+            if name in getattr(self, "model_pending", set()):
+                visible = ()
+            for action in visible:
+                buttons[action].pack(side="left", padx=(0, 6))
+            if focused in buttons.values() and focused not in [buttons[a] for a in visible]:
+                (buttons[visible[0]] if visible else status).focus_set()
 
     def choose_theme(self, selected):
         self.theme_var.set(selected)
@@ -999,6 +1239,29 @@ class DesktopApp:
 
     def show_about(self):
         inside = self.scroll_area(self.body)
+        package = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+        try:
+            version = json.loads((package / "build-info.json").read_text(encoding="utf-8"))["version"]
+        except (OSError, ValueError, KeyError):
+            version = "source build"
+        self.label(inside, f"WaveType {version}", 15, weight="bold").pack(fill="x", pady=(0, 8))
+        self.label(inside, "Parakeet downloads on first launch. Settings shows download progress "
+                   "and disk usage, with Download, Pause / Resume, Cancel, Verify / repair, "
+                   "and Delete model controls when relevant. Deleted models stay deleted until you choose Download. "
+                   "After verification, speech processing runs on this computer.", 10,
+                   wraplength=620, justify="left").pack(fill="x", pady=(0, 10))
+        self.label(inside, "Models, preferences, history, and logs stay in %LOCALAPPDATA%\\STTCore "
+                   "unless you select ‘Also delete all local data’ during uninstall. Exit WaveType "
+                   "from the tray before installing or uninstalling; active recording will stop. "
+                   "Check the release page for the signing and validation "
+                   "status of your installer.", 9, color="muted",
+                   wraplength=620, justify="left").pack(fill="x", pady=(0, 12))
+        self.button(inside, "Release status", lambda: webbrowser.open(RELEASES)).pack(anchor="w", pady=2)
+        for title, filename in (("Privacy and installation notices", "INSTALL-NOTICES.txt"),
+                                ("Third-party licences", "LICENSES.md")):
+            path = package / filename
+            if path.is_file():
+                self.button(inside, title, lambda item=path: webbrowser.open(item.as_uri())).pack(anchor="w", pady=2)
         info = [
             ("Parakeet Redux", "CC BY 4.0 · Moondream + NVIDIA · converted GGUF",
              "https://huggingface.co/moondream/parakeet-redux"),
@@ -1014,8 +1277,7 @@ class DesktopApp:
              "https://github.com/google/fonts"),
             ("NVIDIA CUDA runtime", "Optional GPU components; NVIDIA redistributable terms apply",
              "https://docs.nvidia.com/cuda/eula/index.html")]
-        self.label(inside, "All speech processing runs on this computer after model setup.", 11,
-                   wraplength=620).pack(fill="x", pady=(0, 20))
+        self.label(inside, "Model and component credits", 11, weight="bold").pack(fill="x", pady=(16, 10))
         for title, detail, url in info:
             row = tk.Frame(inside, bg=self.colors["card"], padx=15, pady=11)
             row.pack(fill="x", pady=5)
@@ -1044,6 +1306,10 @@ class DesktopApp:
 
 
 def main():
+    import maintenance
+    if maintenance.active():
+        ctypes.windll.user32.MessageBoxW(None, "WaveType setup is open. Finish or close setup before starting WaveType.", "WaveType", 0x40)
+        return
     if os.name != "nt":
         raise OSError("The desktop client requires Windows")
     if not getattr(sys, "frozen", False) and Path(sys.executable).name.lower() == "python.exe":

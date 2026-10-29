@@ -232,6 +232,37 @@ class EngineTests(unittest.TestCase):
             self.assertIs(app.shell, shell)
             app.navigate("Settings")
             self.assertIs(app.shell, shell)
+            self.assertEqual(set(app.model_widgets), {"asr", "cleanup"})
+            for state, extra, visible, progress in (
+                    ("missing", {}, (2,), False),
+                    ("downloading", {}, (4, 5), True),
+                    ("paused", {}, (2, 5), True),
+                    ("ready", {}, (3, 6), False),
+                    ("failed", {"installed": True}, (3, 6), False),
+                    ("verifying", {"operation": "verify"}, (), True),
+                    ("verifying", {"operation": "repair"}, (4, 5), True),
+                    ("deleting", {}, (), True)):
+                app.model = {"models": {"asr": {"state": state, "disk_bytes": 1234, **extra}}}
+                app.update_model_cards()
+                widgets = app.model_widgets["asr"]
+                self.assertEqual(tuple(i for i in range(2, 7) if widgets[i].winfo_manager()), visible)
+                self.assertEqual(bool(widgets[1].winfo_manager()), progress)
+                self.assertIn("on disk", widgets[0].cget("text"))
+                for i in visible:
+                    self.assertEqual(widgets[i].cget("compound"), "left")
+                    self.assertEqual(str(widgets[i].cget("takefocus")), "1")
+            app.model = {"models": {"asr": {"state": "failed", "error": "Offline"},
+                                    "cleanup": {"state": "missing"}}}
+            app.update_model_cards()
+            self.assertIn("Offline", app.model_widgets["asr"][0].cget("text"))
+            self.assertEqual(app.model_widgets["asr"][2].cget("text"), "Download")
+            app.pill.ready = True
+            app.model_widgets["asr"][2].invoke()
+            self.assertEqual(app.pill.request.call_args.args[0], "model_download")
+            self.assertEqual(app.pill.request.call_args.kwargs["model"], "asr")
+            app.model_widgets["cleanup"][3].invoke()
+            self.assertTrue(app.pill.request.call_args.kwargs["repair"])
+            app.pill.ready = False
             self.assertEqual(app.settings_apply.winfo_manager(), "")
             self.assertEqual(app.mic_combo.cget("bd"), 0)
             self.assertEqual(app.mic_combo.cget("highlightthickness"), 0)
@@ -259,6 +290,7 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(app.preferences["theme"], "Dark")
             self.assertEqual(app.settings_apply.winfo_manager(), "")
             self.assertEqual(app.main.winfo_children()[0].cget("bg"), DARK["bg"])
+            self.assertEqual(app.model_icon("download").get(8, 2), (244, 240, 233))
             with patch.object(app, "save_preferences"), patch.object(
                     app, "draw_toggle", wraps=app.draw_toggle) as draw:
                 app.after_tray_smart({"smart": True}, None)
@@ -332,9 +364,11 @@ class EngineTests(unittest.TestCase):
 
     def test_asr_loads_at_recording_and_unloads_after_idle(self):
         fake_asr = Mock()
-        with patch.object(engine, "ParakeetLibraryASR", return_value=fake_asr) as load:
+        with (patch.object(engine, "ParakeetLibraryASR", return_value=fake_asr) as load,
+              patch("model_manager.ModelDownloads")):
             core = engine.DictationEngine(capture=False)
             try:
+                core.asr_library = Path("parakeet.dll")
                 load.assert_not_called()
                 core._warm_asr()
                 self.assertIs(core.asr_future.result(timeout=2), fake_asr)
@@ -349,6 +383,52 @@ class EngineTests(unittest.TestCase):
                 self.assertIsNone(core.asr_future)
             finally:
                 core.close()
+
+    def test_engine_keeps_settings_available_without_microphone(self):
+        with (patch("model_manager.ModelDownloads") as downloads,
+              patch.object(engine.DictationEngine, "_start_capture", side_effect=OSError("no input device"))):
+            core = engine.DictationEngine(capture=True)
+            try:
+                self.assertIn("Microphone unavailable", core.command("status", {})["capture_error"])
+                self.assertFalse(core.command("status", {})["capture_ready"])
+                self.assertEqual(core.command("settings", {"mode": "hybrid", "smart": False,
+                                                            "microphone": None})["mode"], "hybrid")
+                with self.assertRaisesRegex(ValueError, "Microphone unavailable"):
+                    core.command("capture_retry", {})
+                downloads.return_value.startup.assert_any_call("asr")
+            finally:
+                core.close()
+
+    def test_model_commands_report_and_control_jobs(self):
+        self.core.models = Mock()
+        self.core.models.snapshot.return_value = {
+            "asr": {"state": "failed", "error": "Offline"},
+            "cleanup": {"state": "missing", "error": ""}}
+        with (patch("model_manager.gpu_available", return_value=False),
+              patch("model_manager.free_memory_gb", return_value=8)):
+            result = self.core.command("model_status", {})
+        self.assertEqual(result["models"]["asr"]["error"], "Offline")
+        self.assertFalse(result["asr_installed"])
+        self.core.command("model_download", {"model": "cleanup"})
+        self.core.models.start.assert_called_with("cleanup", repair=False)
+        self.core.command("model_stop", {"model": "cleanup", "action": "pause"})
+        self.core.models.stop.assert_called_with("cleanup", "pause")
+        self.core.smart_enabled = True
+        self.core.command("model_delete", {"model": "cleanup"})
+        self.core.models.delete.assert_called_once_with("cleanup")
+        self.assertFalse(self.core.smart_enabled)
+        self.core.state = "recording"
+        with self.assertRaisesRegex(ValueError, "Finish or cancel"):
+            self.core.command("model_delete", {"model": "asr"})
+        self.core.state = "idle"
+
+    def test_failed_native_load_releases_library_handle(self):
+        dll = Mock(_handle=123)
+        dll.parakeet_capi_abi_version.return_value = 0
+        with patch("engine.ctypes.CDLL", return_value=dll), patch("_ctypes.FreeLibrary") as free:
+            with self.assertRaisesRegex(OSError, "unsupported"):
+                engine.ParakeetLibraryASR("invalid-library")
+        free.assert_called_once_with(123)
 
     def test_insertion_rejects_changed_target(self):
         if os.name != "nt":
