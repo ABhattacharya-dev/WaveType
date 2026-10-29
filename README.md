@@ -6,9 +6,13 @@ Local Windows 10/11 dictation with Parakeet Redux transcription, optional Qwen c
 
 Download `WaveType-0.1.0-beta.1-Setup-x64.exe` from the [GitHub prerelease](https://github.com/ABhattacharya-dev/stt-core-structure/releases/tag/v0.1.0-beta.1). It is for Intel/AMD x64 Windows 10/11 and includes Python, the app and the engine. Keep Defender enabled: this first preview is unsigned, and clean-machine and Defender validation are pending. The release includes SHA-256 checksums.
 
-The wizard lets you choose an installation folder, Start Menu and desktop shortcuts, startup on sign-in, and whether to download optional Smart cleanup now. Startup and Smart cleanup downloads are off by default. Setup downloads and verifies the base speech model; interrupted downloads can resume when you launch WaveType. Smart cleanup remains off until enabled in the tray or Settings, even if its files were downloaded during setup. The finish page offers app launch and an unchecked developer-page link.
+Installation finishes before model downloads. On first launch, WaveType downloads Parakeet; Qwen remains optional. Settings shows Download, Pause / Resume, Cancel, Verify / repair and Delete model controls when relevant, with progress and per-model disk usage.
 
-Speech processing runs locally after setup. Models, settings, personal dictionaries and history are retained under `%LOCALAPPDATA%\STTCore` when you uninstall. The uninstaller removes only shipped app files. Read the [privacy notes](docs/PRIVACY.md) and [release status](docs/RELEASE.md).
+The source tree and local development installer now target **0.1.0-beta1.01**; the beta 1 link above is the previously published release. Exit WaveType from the tray before upgrading or uninstalling. Setup checks for files still in use and offers Retry or Cancel; it never force-closes the app. Older uninstallers cannot be updated retroactively: install beta 1.01 to get the new uninstall choices.
+
+Deleting a model removes its downloaded weights, runtimes, cached archives, partial files and verification records. Qwen deletion includes both CPU and GPU runtimes and turns off Smart cleanup. Parakeet deletion makes dictation unavailable until you download it again. Pause, Cancel and intentional deletion are remembered across restarts. The other model and your history, settings and dictionary are preserved. Progress bars appear only while downloading, paused, verifying, deleting, or completing a pause/cancel request.
+
+History stores the final text, date/time, and foreground app name as readable local JSON. Installed-app models, settings, dictionaries, history, and logs live under `%LOCALAPPDATA%\STTCore`. Uninstall keeps them by default so reinstall restores your setup. Select **Also delete all local data** for a fresh start; this also removes partial downloads. Custom data locations are not removed. Read the full [privacy notes](docs/PRIVACY.md).
 
 ## Run from source
 

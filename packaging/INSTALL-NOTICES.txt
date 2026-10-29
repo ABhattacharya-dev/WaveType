@@ -2,24 +2,39 @@ WaveType - Windows x64 preview
 
 WaveType processes speech and optional Smart cleanup on this computer.
 It does not upload recordings, dictation text, history, or personal dictionaries.
-Missing models and runtimes are downloaded over HTTPS from Hugging Face and
-GitHub and verified against pinned SHA-256 hashes. Subsequent dictation works
-offline. Links open in your browser only when you choose them.
+Installation does not download models. On first launch, Parakeet downloads
+automatically. You may download optional Qwen in Settings. Both model downloads
+show progress and can be paused, canceled, resumed or repaired. Missing files
+are downloaded over HTTPS from Hugging Face and GitHub and verified against
+pinned SHA-256 hashes. Subsequent dictation works offline. Links open in your
+browser only when you choose them.
 
-The microphone remains open while the engine runs for a short in-memory
-pre-roll. Recorded audio is processed in memory and is not saved in history.
+When available, the microphone remains open while the engine runs for a short
+in-memory pre-roll. If unavailable, Settings remains accessible. Recorded audio
+is processed in memory and is not saved in history.
 History stores date, time, final text and app name as readable local JSON.
 You can delete individual history entries in the app. Local data and model
-files are kept in %LOCALAPPDATA%\STTCore and are retained on uninstall.
+files are kept in %LOCALAPPDATA%\STTCore. Uninstall keeps them by default;
+select "Also delete all local data" to remove models, partial downloads,
+settings, dictionaries, history and logs for a fresh start. Directory links
+and custom data locations are not followed or removed. Failures are reported.
+Settings can delete each model and its downloaded runtimes separately.
+Deleting Qwen includes CPU/GPU runtimes and disables Smart cleanup. Deleting
+Parakeet stops dictation until downloaded again. Pause, cancel and deletion
+choices survive restart. The other model and personal data are preserved.
 An app you dictate into may itself send or sync the inserted text.
 
 Startup is optional. The global keyboard hook handles the dictation shortcut;
 WaveType does not store ordinary keystrokes. Choose Exit from the tray to stop
 the app, microphone capture, engine and cleanup subprocesses.
+Exit before installing, upgrading or uninstalling. Active recording stops
+without inserting unfinished speech. Setup offers Retry or Cancel if files
+remain in use; it never silently force-closes the app.
 
-This preview is unsigned. A trusted code-signing certificate, clean-machine
-validation and a Defender scan of the final package are still pending. A clean
-antivirus result and absence of SmartScreen warnings are not guaranteed.
+The published beta 1 preview is unsigned. Future releases can be signed using
+a publicly trusted certificate, but clean-machine validation and a Defender
+scan of the final package are still required. A clean antivirus result and
+absence of SmartScreen warnings are not guaranteed.
 Never disable antivirus or add exclusions to run WaveType.
 
 Third-party components:

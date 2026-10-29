@@ -12,7 +12,7 @@ Optional Smart cleanup uses Qwen through an authenticated server bound to 127.0.
 
 The engine's authenticated inter-process communication (IPC) also listens only on 127.0.0.1.
 
-Setup downloads missing models and runtimes over HTTPS from Hugging Face and GitHub and verifies pinned SHA-256 hashes.
+After installation, the app downloads missing models and runtimes over HTTPS from Hugging Face and GitHub and verifies pinned SHA-256 hashes. Parakeet starts on first launch; Qwen downloads only when selected in Settings. Pausing retains a partial download; canceling removes it.
 
 These download services receive ordinary connection information, not dictation.
 
@@ -24,7 +24,7 @@ An application receiving inserted text may independently send or synchronize it.
 
 Microphone and Data Storage
 
-The microphone remains open while the engine runs to maintain a short pre-roll in memory. Recorded clips and inference buffers stay in memory.
+When an input device is available, the microphone remains open while the engine runs to maintain a short pre-roll in memory. The app can still open Settings if no microphone is available. Recorded clips and inference buffers stay in memory.
 
 History stores only the following information:
 
@@ -44,9 +44,13 @@ Installed-app data lives in %LOCALAPPDATA%\STTCore.
 
 Individual history entries can be deleted in History.
 
-Uninstallation retains models, preferences, dictionaries, history, and diagnostic logs.
+Uninstallation keeps models, partial downloads, preferences, dictionaries, history, and diagnostic logs by default. Reinstalling restores this data.
 
-To remove these files as well, exit WaveType and manually delete the data folder.
+Select the unchecked “Also delete all local data” option during uninstall to remove the canonical %LOCALAPPDATA%\STTCore folder for a fresh start. Directory links are not followed; any failure is reported and the uninstall entry remains available to retry. Custom data locations are not removed. Silent uninstall keeps data unless /REMOVE-DATA is explicitly supplied.
+
+Settings offers separate deletion for Parakeet and Qwen, including each model's downloaded runtimes, cached archives, partial files and verification records. Qwen includes both CPU and GPU runtimes. Deleting Qwen turns off Smart cleanup; deleting Parakeet prevents dictation until downloaded again. Personal data and the other model are kept. Pause, cancel and deletion intent are stored locally and survive restarting the app.
+
+Exit WaveType from the tray before install, upgrade or uninstall. Setup checks file access and asks you to retry if files remain in use. Exiting stops active recording without inserting unfinished speech, releases the microphone and stops model workers and owned cleanup processes.
 
 Source runs keep personal dictionaries, models, and history in ignored repository folders instead.
 

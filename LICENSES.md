@@ -11,3 +11,5 @@
 - Python, Tcl/Tk, and bundled Python dependencies: Their license notices are available from their upstream distributions. This package does not claim ownership of those components.
 
 The installer also includes full parakeet.cpp, llama.cpp, and Qwen license texts in `licenses/`.
+
+Model weights and downloaded runtimes are managed in Settings, separately from bundled application files and their notices. “Delete model” removes the selected model's weights, downloaded runtimes (both CPU and GPU for Qwen), verification records, cached archives and partial downloads. The bundled Parakeet CLI and installed license texts remain with the app. Model downloads are verified against pinned hashes before use. Uninstall keeps local data by default; selecting “Also delete all local data” removes the canonical `%LOCALAPPDATA%\STTCore` folder. See [privacy notices](docs/PRIVACY.md) and [release instructions](docs/RELEASE.md) for details.
