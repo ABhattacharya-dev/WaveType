@@ -2,6 +2,7 @@ import hashlib
 import ctypes
 import os
 import json
+import queue
 import tempfile
 import threading
 import time
@@ -649,6 +650,30 @@ class EngineTests(unittest.TestCase):
             self.assertTrue(app.tray_smart_var.get())
             self.assertTrue(app.preferences["smart"])
             app.pill.messages.put.assert_called_once()
+
+    def test_subscription_does_not_expire_while_idle(self):
+        from pill import Pill
+
+        resident = Pill.__new__(Pill)
+        resident.engine_job = None
+        resident.messages = queue.SimpleQueue()
+        resident.commands = queue.SimpleQueue()
+        resident.commands.put((None, {}, None))
+        resident.ready = False
+        resident.closing = True
+        commands = Mock()
+        commands.command.side_effect = lambda name, **_args: {"state": "idle"} if name == "status" else {}
+        events = Mock()
+
+        def subscribed_events():
+            events.sock.settimeout.assert_called_once_with(None)
+            return iter(())
+
+        events.events.side_effect = subscribed_events
+        with patch("pill.EngineClient", side_effect=[commands, events]):
+            resident._connect(False, 250, {})
+        resident.command_worker.join(timeout=2)
+        self.assertFalse(resident.command_worker.is_alive())
 
     def test_guards(self):
         self.assertTrue(engine.cleanup_needed("meet at six sorry seven"))
