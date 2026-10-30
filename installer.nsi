@@ -78,6 +78,7 @@ Var EngineLock
 Var RemovalFailed
 
 Function .onInit
+  SetShellVarContext current
   ${IfNot} ${IsNativeAMD64}
     MessageBox MB_ICONSTOP|MB_OK "This release requires an Intel/AMD x64 Windows 10 or 11 PC."
     Abort
@@ -90,6 +91,32 @@ Function .onInit
   StrCpy $StartMenuChoice ${BST_CHECKED}
   StrCpy $DesktopChoice ${BST_CHECKED}
   StrCpy $StartupChoice ${BST_UNCHECKED}
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/UPDATE" $1
+  ${IfNot} ${Errors}
+    IfSilent +3 0
+      SetErrorLevel 2
+      Abort
+    ReadRegStr $1 HKCU "Software\WaveType" "InstallDir"
+    ${If} $1 == ""
+      SetErrorLevel 2
+      Abort
+    ${EndIf}
+    ${If} $1 != $INSTDIR
+      SetErrorLevel 2
+      Abort
+    ${EndIf}
+    IfFileExists "$INSTDIR\WaveType.exe" +3 0
+      SetErrorLevel 2
+      Abort
+    StrCpy $StartMenuChoice ${BST_UNCHECKED}
+    StrCpy $DesktopChoice ${BST_UNCHECKED}
+    IfFileExists "$SMPROGRAMS\WaveType\WaveType.lnk" 0 +2
+      StrCpy $StartMenuChoice ${BST_CHECKED}
+    IfFileExists "$DESKTOP\WaveType.lnk" 0 +2
+      StrCpy $DesktopChoice ${BST_CHECKED}
+  ${EndIf}
   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "WaveType"
   ${If} $0 == ""
     ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "STT Core"

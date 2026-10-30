@@ -51,7 +51,9 @@ WaveType is a local dictation app for Windows 10 and 11. A floating pill and a *
 
 Installation finishes before model downloads. On first launch, WaveType downloads Parakeet; Qwen remains optional. Settings shows Download, Pause / Resume, Cancel, Verify / repair and Delete model controls when relevant, with progress and per-model disk usage.
 
-The current preview is **0.1.0-beta1.01**. See the [short release notes](docs/releases/0.1.0-beta1.01.md) for changes since beta 1. Exit WaveType from the tray before upgrading or uninstalling. Setup checks for files still in use and offers Retry or Cancel; it never force-closes the app. Older uninstallers cannot be updated retroactively: install beta 1.01 to get the new uninstall choices.
+Installed builds that include the updater can check for app updates in Settings. Automatic checking and downloading are off by default; an update always asks before installation. Manual checks are rate limited, and installer downloads can be paused, resumed, or canceled. WaveType verifies the release checksum, then closes, updates, and reopens after approval. See [app update details](docs/UPDATES.md).
+
+The current preview is **0.1.0-beta1.01**. See the [short release notes](docs/releases/0.1.0-beta1.01.md) for changes since beta 1. Exit WaveType from the tray before running a downloaded installer manually or uninstalling. In-app updates close the app after approval. Setup checks for files still in use and offers Retry or Cancel; it never force-closes the app. Older uninstallers cannot be updated retroactively: install beta 1.01 to get the new uninstall choices.
 
 Deleting a model removes its downloaded weights, runtimes, cached archives, partial files and verification records. Qwen deletion includes both CPU and GPU runtimes and turns off Smart cleanup. Parakeet deletion makes dictation unavailable until you download it again. Pause, Cancel and intentional deletion are remembered across restarts. The other model and your history, settings and dictionary are preserved. Progress bars appear only while downloading, paused, verifying, deleting, or completing a pause/cancel request.
 

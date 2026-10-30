@@ -16,6 +16,8 @@ After installation, the app downloads missing models and runtimes over HTTPS fro
 
 These download services receive ordinary connection information, not dictation.
 
+Installed builds can also check GitHub Releases for app updates. Automatic checks and downloads are off by default. A manual check or enabling automatic updates sends an HTTPS request to GitHub; installer downloads stay in the local app data folder and are checked against the release SHA-256 file. No dictation audio or text is included in update requests.
+
 Browser links open only when selected.
 
 Dictation works offline after the required files are installed.

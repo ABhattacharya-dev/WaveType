@@ -51,7 +51,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Engine bundle failed.' }
     --add-data 'assets\EBGaramond.ttf;assets' `
     --add-data 'assets\JetBrainsMono.ttf;assets' `
     --add-data 'assets\icons;assets\icons' `
-    --add-data 'assets\lock_frames;assets\lock_frames' desktop.py
+    --add-data 'assets\lock_frames;assets\lock_frames' `
+    --add-data 'packaging\update_helper.ps1;packaging' desktop.py
 if ($LASTEXITCODE -ne 0) { throw 'UI bundle failed.' }
 
 $bundle = (Resolve-Path -LiteralPath (Join-Path $project 'dist\WaveType')).Path
