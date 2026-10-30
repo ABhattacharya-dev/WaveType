@@ -7,6 +7,7 @@ import os
 import queue
 import subprocess
 import sys
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 import webbrowser
@@ -16,6 +17,7 @@ from datetime import date, time as clock_time, timedelta
 from pathlib import Path
 
 from ipc_protocol import APP_DIR
+from app_update import MANUAL_COOLDOWN, UpdateManager, installed_version
 from pill import Pill
 from windows_support import ChildJob
 
@@ -176,6 +178,11 @@ class DesktopApp:
         except (FileNotFoundError, ValueError):
             self.preferences = {}
         self.first_run = not PREFERENCES.exists()
+        self.updates = UpdateManager(APP_DIR, installed_version(sys.executable))
+        self.update_state = {"state": "idle"}
+        self.update_manual = False
+        self.prompted_version = None
+        self.update_error_on_start = self.read_update_result()
         self.theme = self.preferences.get("theme", "Light")
         self.colors = DARK if self.theme == "Dark" or self.theme == "System" and system_dark() else LIGHT
         self.page = "Setup" if self.first_run else "History"
@@ -231,6 +238,8 @@ class DesktopApp:
             self.show()
         self.root.after(100, self.drain_tray)
         self.root.after(500, self.watch_ready)
+        self.root.after(250, self.poll_updates)
+        self.root.after(5000, self.auto_check_update)
 
     def on_window_message(self, message, wparam, lparam):
         return getattr(self, "tray", None) is not None and self.tray.message(message, wparam, lparam)
@@ -339,6 +348,96 @@ class DesktopApp:
 
     def save_preferences(self):
         PREFERENCES.write_text(json.dumps(self.preferences, indent=2) + "\n", encoding="utf-8")
+
+    def read_update_result(self):
+        result = APP_DIR / "update-result.json"
+        try:
+            value = json.loads(result.read_text(encoding="utf-8-sig"))
+            return value.get("message", "") if value.get("status") == "failed" else ""
+        except (OSError, ValueError, AttributeError):
+            return ""
+        finally:
+            result.unlink(missing_ok=True)
+
+    def auto_check_update(self, reschedule=True):
+        if self.preferences.get("auto_update") and self.updates.current_version:
+            if self.updates.check(automatic=True):
+                self.root.after(MANUAL_COOLDOWN * 1000, self.update_update_card)
+        if reschedule and not getattr(self, "quitting", False):
+            self.root.after(60 * 60 * 1000, self.auto_check_update)
+
+    def poll_updates(self):
+        while not self.updates.events.empty():
+            event = self.updates.events.get_nowait()
+            self.update_state = event
+            state = event["state"]
+            if state == "available" and self.update_manual:
+                self.update_manual = False
+                self.show()
+                if messagebox.askyesno("WaveType update available",
+                                       f"Download WaveType {event['version']} now?",
+                                       parent=self.main):
+                    self.updates.download()
+            elif state == "ready" and self.prompted_version != event["version"]:
+                self.prompted_version = event["version"]
+                self.show()
+                if messagebox.askyesno("Install WaveType update?",
+                                       f"WaveType {event['version']} is downloaded and verified. "
+                                       "WaveType will close, update, then reopen. Install now?",
+                                       parent=self.main):
+                    self.install_update(approved=True)
+            elif state in ("current", "error"):
+                self.update_manual = False
+            self.update_update_card()
+        if self.update_error_on_start:
+            self.show()
+            messagebox.showerror("WaveType update failed", self.update_error_on_start, parent=self.main)
+            self.update_error_on_start = ""
+        if not getattr(self, "quitting", False):
+            self.root.after(250, self.poll_updates)
+
+    def manual_check_update(self):
+        if not self.updates.current_version:
+            self.update_state = {"state": "error", "message": "Update checks require an installed WaveType build."}
+            self.update_update_card()
+            return
+        self.update_manual = True
+        if not self.updates.check():
+            self.update_manual = False
+        else:
+            self.root.after(MANUAL_COOLDOWN * 1000, self.update_update_card)
+        self.update_update_card()
+
+    def set_auto_update(self):
+        self.preferences["auto_update"] = self.auto_update_var.get()
+        self.save_preferences()
+        if self.auto_update_var.get():
+            self.auto_check_update(reschedule=False)
+
+    def install_update(self, approved=False):
+        installer = self.updates.ready_installer()
+        package = Path(sys.executable).parent
+        helper = Path(__file__).resolve().parent / "packaging" / "update_helper.ps1"
+        if not installer or not helper.is_file() or not (package / "Uninstall.exe").is_file():
+            self.report("Express update requires an installed WaveType build and a verified download.")
+            return
+        if not approved and not messagebox.askyesno("Install WaveType update?",
+                "WaveType will close, install the update, then reopen. Continue?", parent=self.main):
+            return
+        command = [str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" /
+                       "WindowsPowerShell" / "v1.0" / "powershell.exe"),
+                   "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(helper),
+                   "-Installer", str(installer), "-InstallDir", str(package), "-AppPid", str(os.getpid()),
+                   "-ExpectedSha256", self.updates.expected_hash,
+                   "-ResultFile", str(APP_DIR / "update-result.json")]
+        try:
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, close_fds=True,
+                             creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
+        except OSError as exc:
+            self.report(f"Could not start the update: {exc}")
+            return
+        self.quit()
 
     def watch_ready(self):
         if self.pill.ready and not getattr(self, "initialized", False):
@@ -928,6 +1027,9 @@ class DesktopApp:
             self.settings_apply.pack_forget()
 
     def show_settings(self):
+        if not hasattr(self, "updates"):
+            self.updates = UpdateManager(APP_DIR, installed_version(sys.executable))
+            self.update_state = {"state": "idle"}
         inside = self.scroll_area(self.body)
         self.smart_var = tk.BooleanVar(value=bool(self.preferences.get("smart", False)))
         self.login_var = tk.BooleanVar(value=login_enabled())
@@ -1047,9 +1149,87 @@ class DesktopApp:
                                  highlightthickness=1, highlightcolor=self.colors["link"])
             self.model_widgets[name] = (status, bar, start, verify, pause, cancel, delete, actions)
         self.update_model_cards()
-        self.label(inside, "Releases can be checked on GitHub. Dictation stays local.",
-                   9, color="muted").pack(fill="x", pady=(20, 9))
-        self.button(inside, "Open releases", lambda: webbrowser.open(RELEASES)).pack(anchor="w")
+        self.label(inside, "App updates", 13, weight="bold").pack(fill="x", pady=(22, 5))
+        update_card = tk.Frame(inside, bg=self.colors["card"], padx=16, pady=12,
+                               highlightbackground=self.colors["line"], highlightthickness=1)
+        update_card.pack(fill="x", pady=5)
+        row = tk.Frame(update_card, bg=self.colors["card"])
+        row.pack(fill="x")
+        info = tk.Frame(row, bg=self.colors["card"])
+        info.pack(side="left", fill="x", expand=True)
+        self.label(info, "Check and download automatically", 10, weight="bold").pack(fill="x")
+        self.label(info, "Checks GitHub Releases; asks before installing.", 9, color="muted").pack(fill="x")
+        self.auto_update_var = tk.BooleanVar(value=bool(self.preferences.get("auto_update", False)))
+        toggle = tk.Canvas(row, width=44, height=24, bg=self.colors["card"],
+                           highlightthickness=0, cursor="hand2", takefocus=1)
+        toggle.pack(side="right")
+        toggle.bind("<Button-1>", lambda _event: self.auto_update_var.set(not self.auto_update_var.get()))
+        toggle.bind("<space>", lambda _event: self.auto_update_var.set(not self.auto_update_var.get()))
+        toggle.bind("<Return>", lambda _event: self.auto_update_var.set(not self.auto_update_var.get()))
+        trace = self.auto_update_var.trace_add("write", lambda *_args: (
+            self.draw_toggle(toggle, self.auto_update_var.get()), self.set_auto_update()))
+        toggle.bind("<Destroy>", lambda _event: self.auto_update_var.trace_remove("write", trace))
+        self.draw_toggle(toggle, self.auto_update_var.get())
+        self.update_status = self.label(update_card, "", 9, color="muted", wraplength=530)
+        self.update_status.pack(fill="x", pady=(12, 4))
+        self.update_bar = ttk.Progressbar(update_card, orient="horizontal", mode="determinate", maximum=100)
+        actions = tk.Frame(update_card, bg=self.colors["card"])
+        actions.pack(fill="x", pady=(8, 0))
+        self.update_buttons = {
+            "check": self.button(actions, "Check for updates", self.manual_check_update),
+            "download": self.button(actions, "Download", self.updates.download),
+            "pause": self.button(actions, "Pause", self.updates.pause),
+            "resume": self.button(actions, "Resume", self.updates.download),
+            "cancel": self.button(actions, "Cancel", self.updates.cancel),
+            "install": self.button(actions, "Install update", self.install_update),
+        }
+        self.update_update_card()
+        self.button(inside, "Open releases", lambda: webbrowser.open(RELEASES)).pack(anchor="w", pady=(9, 0))
+
+    def update_update_card(self):
+        if not hasattr(self, "update_status") or not self.update_status.winfo_exists():
+            return
+        state = self.update_state.get("state", "idle")
+        version = self.update_state.get("version") or (self.updates.release or {}).get("version", "")
+        labels = {"idle": "Updates have not been checked yet.", "checking": "Checking for a newer release…",
+                  "current": "You have the newest available WaveType release.",
+                  "available": f"WaveType {version} is available.",
+                  "downloading": f"Downloading WaveType {version}…",
+                  "paused": "Download paused. Resume when ready.",
+                  "canceled": "Download canceled.",
+                  "ready": f"WaveType {version} is ready to install.",
+                  "error": self.update_state.get("message", "Update failed.")}
+        if not self.updates.current_version:
+            labels["idle"] = "App updates are available in installed builds."
+        self.update_status.configure(text=labels.get(state, state))
+        buttons = self.update_buttons
+        for button in buttons.values():
+            button.pack_forget()
+        cooldown = time.monotonic() - self.updates.last_check < MANUAL_COOLDOWN
+        buttons["check"].configure(state="disabled" if self.updates.busy or cooldown or
+                                   not self.updates.current_version else "normal")
+        buttons["check"].pack(side="left", padx=(0, 6))
+        if state in ("available", "error", "canceled") and self.updates.release and not self.updates.busy:
+            buttons["download"].pack(side="left", padx=(0, 6))
+        elif state == "downloading":
+            buttons["pause"].pack(side="left", padx=(0, 6))
+            buttons["cancel"].pack(side="left", padx=(0, 6))
+        elif state == "paused":
+            buttons["resume"].pack(side="left", padx=(0, 6))
+            buttons["cancel"].pack(side="left", padx=(0, 6))
+        elif state == "ready":
+            buttons["install"].pack(side="left", padx=(0, 6))
+            buttons["cancel"].pack(side="left", padx=(0, 6))
+        if state in ("downloading", "paused"):
+            self.update_bar.pack(fill="x", pady=(5, 0), before=buttons["check"].master)
+            received = self.update_state.get("received", 0)
+            total = self.update_state.get("total", 0)
+            self.update_bar.configure(value=100 * received / total if total else 0)
+            if total:
+                self.update_status.configure(text=f"{labels[state]} {received // (1024 * 1024)} / "
+                                             f"{total // (1024 * 1024)} MiB")
+        else:
+            self.update_bar.pack_forget()
 
     def model_action(self, command, model, action=None, repair=False):
         if not self.pill.ready:
