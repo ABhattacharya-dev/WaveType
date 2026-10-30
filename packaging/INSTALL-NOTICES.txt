@@ -9,6 +9,11 @@ are downloaded over HTTPS from Hugging Face and GitHub and verified against
 pinned SHA-256 hashes. Subsequent dictation works offline. Links open in your
 browser only when you choose them.
 
+Installed WaveType can check GitHub Releases for a newer app version. Automatic
+checking and downloading are off by default. You may check manually in Settings.
+The update installer is verified against the release SHA-256 checksum before
+WaveType asks to install it. No speech or dictated text is sent to GitHub.
+
 When available, the microphone remains open while the engine runs for a short
 in-memory pre-roll. If unavailable, Settings remains accessible. Recorded audio
 is processed in memory and is not saved in history.
@@ -27,13 +32,13 @@ An app you dictate into may itself send or sync the inserted text.
 Startup is optional. The global keyboard hook handles the dictation shortcut;
 WaveType does not store ordinary keystrokes. Choose Exit from the tray to stop
 the app, microphone capture, engine and cleanup subprocesses.
-Exit before installing, upgrading or uninstalling. Active recording stops
+Exit before running setup manually or uninstalling. An approved in-app update
+closes WaveType, installs the update, and reopens it. Active recording stops
 without inserting unfinished speech. Setup offers Retry or Cancel if files
 remain in use; it never silently force-closes the app.
 
-This beta 1.01 preview is unsigned. SmartScreen warnings still occur.
-The maintainer reports that Run anyway is available on their machine;
-this may differ on other PCs and is not a SmartScreen fix.
+This beta 1.02 preview is unsigned. SmartScreen warnings may occur.
+GitHub's Verified badge on source commits does not sign the Windows installer.
 Future releases can be signed using
 a publicly trusted certificate, but clean-machine validation and a Defender
 scan of the final package are still required. A clean antivirus result and

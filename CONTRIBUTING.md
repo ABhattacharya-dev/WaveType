@@ -76,8 +76,9 @@ Respond to review comments in the PR. If you update the branch, summarize what c
 ## Local release workflow
 
 - Make a separate local commit for each completed feature or fix, with its focused validation. Keep closely coupled changes together when splitting them would leave a broken intermediate state.
+- Future commits must be cryptographically signed using an identity registered for signing on GitHub. After an authorized push, verify that GitHub reports the commits as Verified. Do not silently fall back to unsigned commits; if signing is not configured, keep changes uncommitted and explain what setup is needed. Do not rewrite existing published commits or release tags just to add signatures.
 - Do not push commits to origin unless the user explicitly requests it.
 - After each task, list the commits made during that task using their short hashes and titles, without descriptions. If no commits were made, say so.
-- The current development version is `0.1.0-beta1.01`. Subsequent requested builds use `0.1.0-beta1.02`, `0.1.0-beta1.03`, and so on. Keep beta 1 until the user explicitly requests a new beta series; do not automatically change to beta 2 or beta 3.
+- The current development version is `0.1.0-beta1.02`. Subsequent requested builds use `0.1.0-beta1.03`, `0.1.0-beta1.04`, and so on. Keep beta 1 until the user explicitly requests a new beta series; do not automatically change to beta 2 or beta 3.
 - Keep version metadata, installer names and release documentation consistent. Previously published release links retain their original versions.
 - Keep personal data, model downloads, signing credentials and generated build artifacts out of commits.
