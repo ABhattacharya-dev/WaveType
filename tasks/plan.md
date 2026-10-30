@@ -40,7 +40,7 @@ Tasks and completion evidence are tracked in [GitHub issue #22](https://github.c
 
 ## Completion evidence
 
-- The project Python environment passed 60 source tests, with one existing symlink test skipped.
+- The project Python environment passed 61 source tests, with one existing symlink test skipped.
 - Release discovery and a complete checksum-verified installer download succeeded against the published beta 1.01 GitHub release.
 - The PyInstaller and NSIS build completed, and the update-only installer rejected a path without an existing installation with exit code 2.
 - The detached helper's failure reporting was exercised. A live installed upgrade on Windows 10/11 remains a release validation step.

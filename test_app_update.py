@@ -2,9 +2,12 @@
 
 import hashlib
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from app_update import UpdateManager, checksum_for, select_release, version_key
 
@@ -73,6 +76,32 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(manager.state, "error")
             self.assertIsNone(manager.ready_installer())
             self.assertFalse((Path(temporary) / "updates" / name).exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows desktop handoff")
+    def test_install_handoff_runs_helper_outside_install_directory(self):
+        import desktop
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "installed"
+            package.mkdir()
+            (package / "Uninstall.exe").write_bytes(b"installer")
+            installer = root / "update.exe"
+            installer.write_bytes(b"download")
+            data = root / "data"
+            data.mkdir()
+            app = desktop.DesktopApp.__new__(desktop.DesktopApp)
+            app.updates = SimpleNamespace(ready_installer=lambda: installer, expected_hash="0" * 64)
+            app.report = Mock()
+            app.quit = Mock()
+            with patch.object(desktop, "APP_DIR", data), \
+                    patch.object(desktop.sys, "executable", str(package / "WaveType.exe")), \
+                    patch.object(desktop.subprocess, "Popen") as launch:
+                app.install_update(approved=True)
+            self.assertEqual((data / "update-helper.ps1").read_bytes(),
+                             (Path(desktop.__file__).parent / "packaging" / "update_helper.ps1").read_bytes())
+            self.assertIn(str(data / "update-helper.ps1"), launch.call_args.args[0])
+            app.quit.assert_called_once()
 
 
 if __name__ == "__main__":

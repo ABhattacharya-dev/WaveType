@@ -417,13 +417,14 @@ class DesktopApp:
     def install_update(self, approved=False):
         installer = self.updates.ready_installer()
         package = Path(sys.executable).parent
-        helper = Path(__file__).resolve().parent / "packaging" / "update_helper.ps1"
-        if not installer or not helper.is_file() or not (package / "Uninstall.exe").is_file():
+        helper_source = Path(__file__).resolve().parent / "packaging" / "update_helper.ps1"
+        if not installer or not helper_source.is_file() or not (package / "Uninstall.exe").is_file():
             self.report("Express update requires an installed WaveType build and a verified download.")
             return
         if not approved and not messagebox.askyesno("Install WaveType update?",
                 "WaveType will close, install the update, then reopen. Continue?", parent=self.main):
             return
+        helper = APP_DIR / "update-helper.ps1"
         command = [str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" /
                        "WindowsPowerShell" / "v1.0" / "powershell.exe"),
                    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(helper),
@@ -431,6 +432,7 @@ class DesktopApp:
                    "-ExpectedSha256", self.updates.expected_hash,
                    "-ResultFile", str(APP_DIR / "update-result.json")]
         try:
+            helper.write_bytes(helper_source.read_bytes())
             subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, close_fds=True,
                              creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
