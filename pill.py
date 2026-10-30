@@ -397,6 +397,7 @@ class Pill:
                     self.messages.put({"event": "error", "message": str(exc)})
             events = EngineClient()
             events.command("subscribe")
+            events.sock.settimeout(None)
             self.messages.put({"event": "state", "value": commands.command("status")["state"]})
             self.ready = True
             self.command_worker = threading.Thread(target=self._command_loop, args=(commands,), daemon=True)

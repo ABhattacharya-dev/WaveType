@@ -7,7 +7,7 @@ Unicode true
 !include "FileFunc.nsh"
 
 !ifndef APP_VERSION
-  !define APP_VERSION "0.1.0-beta1.01"
+  !define APP_VERSION "0.1.0-beta1.02"
 !endif
 !ifndef FILE_VERSION
   !define FILE_VERSION "0.1.0.0"
