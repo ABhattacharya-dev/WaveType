@@ -468,7 +468,7 @@ class DesktopApp:
             helper.write_bytes(helper_source.read_bytes())
             subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, close_fds=True,
-                             creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
+                             creationflags=subprocess.CREATE_NO_WINDOW)
         except OSError as exc:
             self.report(f"Could not start the update: {exc}")
             return

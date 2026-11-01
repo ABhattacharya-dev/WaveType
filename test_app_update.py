@@ -2,7 +2,9 @@
 
 import hashlib
 import io
+import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,11 +30,15 @@ class UpdateTests(unittest.TestCase):
             return {"name": name, "size": 10, "browser_download_url": "https://github.com/ABhattacharya-dev/WaveType/releases/download/test/" + name}
 
         releases = [release("v0.1.0-beta1.03", [asset("WaveType-0.1.0-beta1.03-Setup-x64.exe"), asset("SHA256SUMS.txt")]),
+                    release("v0.1.0-beta1.03.1", [asset("WaveType-0.1.0-beta1.03.1-Setup-x64.exe"), asset("SHA256SUMS.txt")]),
                     release("v0.1.0-beta1.04", [asset("WaveType-0.1.0-beta1.04-Setup-x64.exe")]),
                     release("v0.1.0-beta2.01", [asset("WaveType-0.1.0-beta2.01-Setup-x64.exe"), asset("SHA256SUMS.txt")])]
-        self.assertEqual(select_release(releases, "0.1.0-beta1.02")["version"], "0.1.0-beta1.03")
-        self.assertIsNone(select_release(releases, "0.1.0-beta1.03"))
-        self.assertEqual(version_key("v0.1.0-beta1.12"), (0, 1, 0, 12))
+        self.assertEqual(select_release(releases, "0.1.0-beta1.02")["version"], "0.1.0-beta1.03.1")
+        self.assertEqual(select_release(releases, "0.1.0-beta1.03")["version"], "0.1.0-beta1.03.1")
+        self.assertIsNone(select_release(releases, "0.1.0-beta1.03.1"))
+        self.assertEqual(version_key("v0.1.0-beta1.12"), (0, 1, 0, 12, 0))
+        self.assertEqual(version_key("v0.1.0-beta1.03.1"), (0, 1, 0, 3, 1))
+        self.assertLess(version_key("0.1.0-beta1.03.1"), version_key("0.1.0-beta1.04"))
 
     def test_checksum_must_name_the_exact_installer(self):
         digest = "a" * 64
@@ -101,7 +107,31 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual((data / "update-helper.ps1").read_bytes(),
                              (Path(desktop.__file__).parent / "packaging" / "update_helper.ps1").read_bytes())
             self.assertIn(str(data / "update-helper.ps1"), launch.call_args.args[0])
+            self.assertEqual(launch.call_args.kwargs["creationflags"], subprocess.CREATE_NO_WINDOW)
             app.quit.assert_called_once()
+
+    @unittest.skipUnless(os.name == "nt", "Windows update helper")
+    def test_windowless_helper_records_hash_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installer = root / "update.exe"
+            installer.write_bytes(b"changed after download")
+            result = root / "result.json"
+            helper = Path(__file__).parent / "packaging" / "update_helper.ps1"
+            powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / \
+                "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            process = subprocess.Popen(
+                [str(powershell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                 "-File", str(helper), "-Installer", str(installer), "-InstallDir", str(root),
+                 "-AppPid", "999999", "-ExpectedSha256", "0" * 64, "-ResultFile", str(result)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            self.assertEqual(process.wait(timeout=15), 0)
+            self.assertEqual(json.loads(result.read_text(encoding="utf-8-sig")), {
+                "status": "failed",
+                "message": "The downloaded installer changed after verification. The update was not installed.",
+            })
 
 
 if __name__ == "__main__":

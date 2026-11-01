@@ -14,7 +14,18 @@ try {
     if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) {
         throw 'WaveType did not close in time. The update was not installed.'
     }
-    if ((Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash -ne $ExpectedSha256) {
+    $stream = [IO.File]::OpenRead($Installer)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $actualSha256 = [BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '')
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    if ($actualSha256 -ne $ExpectedSha256) {
         throw 'The downloaded installer changed after verification. The update was not installed.'
     }
     $start = New-Object System.Diagnostics.ProcessStartInfo
