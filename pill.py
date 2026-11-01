@@ -460,6 +460,9 @@ class Pill:
                 break
             if event["event"] == "state":
                 self.toggle_pending = False
+                if event["value"] in ("recording", "locked") and self.state not in ("recording", "locked"):
+                    self.error = None
+                    self.error_serial += 1
                 if event["value"] == "locked" and self.state != "locked":
                     self.lock_started = time.monotonic()
                 self.state = event["value"]

@@ -383,6 +383,24 @@ class EngineTests(unittest.TestCase):
         self.assertFalse(self.core.record_history)
         self.core.command("cancel", {})
 
+    def test_either_chord_finishes_locked_assistant(self):
+        self.core.command("settings", {"mode": "hybrid", "assistant_enabled": True})
+        self.core.command("press", {"assistant": True})
+        self.core.command("release", {"held_ms": 10})
+        self.assertEqual(self.core.state, "locked")
+        self.core.hotkey_enabled = True
+        for actions in (("assistant_press", "assistant_release"),
+                        ("press", "release"),
+                        ("press", "assistant_switch", "assistant_release")):
+            with self.subTest(actions=actions), patch.object(
+                    self.core, "_finish", return_value={"state": "processing"}) as finish:
+                for action in actions:
+                    self.core._hotkey(action, 10)
+                self.core.hotkey_events.join()
+                finish.assert_called_once()
+                self.assertFalse(self.core.hotkey_pending_finish)
+        self.core.command("cancel", {})
+
     def test_assistant_transcript_has_no_cleanup_insertion_or_history(self):
         events = []
         self.core.listeners.add(events.append)
@@ -588,9 +606,17 @@ class EngineTests(unittest.TestCase):
             pill._tick()
             self.assertEqual(pill.canvas.itemcget(pill.shapes["text"], "text"), "Not Found")
             pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "state", "value": "recording", "assistant": True})
+            pill._tick()
+            self.assertIsNone(pill.error)
+            self.assertEqual(pill.canvas.itemcget(pill.bars[0], "state"), "normal")
+            pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "state", "value": "idle", "assistant": False})
             pill.messages.put({"event": "state", "value": "recording", "assistant": False})
             pill._tick()
+            self.assertIsNone(pill.error)
             self.assertEqual(pill.canvas.itemcget(pill.bars[0], "fill"), "white")
+            self.assertEqual(pill.canvas.itemcget(pill.bars[0], "state"), "normal")
         finally:
             pill.root.after_cancel(pill.tick_after)
             pill.root.destroy()

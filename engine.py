@@ -383,6 +383,9 @@ class DictationEngine:
                 if assistant:
                     action = action.removeprefix("assistant_")
                 if action == "switch":
+                    if self.state == "locked" and self.assistant_session:
+                        self.hotkey_pending_finish = True
+                        continue
                     self.hotkey_pending_finish = False
                     if self.state in ("recording", "locked") and not self.assistant_session:
                         self.command("cancel", {})
@@ -396,7 +399,7 @@ class DictationEngine:
                         self.command("cancel", {})
                     continue
                 if action == "press" and self.state == "locked" and self.mode == "hybrid":
-                    if self.assistant_session == assistant:
+                    if self.assistant_session or not assistant:
                         self.hotkey_pending_finish = True
                         continue
                     self.command("cancel", {})
