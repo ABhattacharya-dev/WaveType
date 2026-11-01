@@ -4,10 +4,11 @@ WaveType processes speech and optional Smart cleanup on this computer.
 It does not upload recordings, dictation text, history, or personal dictionaries.
 Installation does not download models. On first launch, Parakeet downloads
 automatically. You may download optional Qwen in Settings. Both model downloads
-show progress and can be paused, canceled, resumed or repaired. Missing files
-are downloaded over HTTPS from Hugging Face and GitHub and verified against
-pinned SHA-256 hashes. Subsequent dictation works offline. Links open in your
-browser only when you choose them.
+show progress and can be paused, canceled, resumed or repaired. Missing model
+files and optional cleanup runtimes are downloaded over HTTPS from Hugging Face
+and GitHub and verified against pinned SHA-256 hashes. The Parakeet CLI and DLL
+are bundled and verified before use. Subsequent dictation works offline.
+Links open in your browser only when you choose them.
 
 Installed WaveType can check GitHub Releases for a newer app version. Automatic
 checking and downloading are off by default. You may check manually in Settings.
@@ -28,6 +29,10 @@ Deleting Qwen includes CPU/GPU runtimes and disables Smart cleanup. Deleting
 Parakeet stops dictation until downloaded again. Pause, cancel and deletion
 choices survive restart. The other model and personal data are preserved.
 An app you dictate into may itself send or sync the inserted text.
+Notepad receives a short clipboard paste because its editor can corrupt rapid
+key input. WaveType restores supported clipboard contents and excludes the
+temporary text from Windows clipboard history and cloud sync. If the current
+clipboard format cannot be preserved, insertion stops; the text stays in History.
 
 Startup is optional. The global keyboard hook handles the dictation shortcut;
 WaveType does not store ordinary keystrokes. Choose Exit from the tray to stop
@@ -37,7 +42,7 @@ closes WaveType, installs the update, and reopens it. Active recording stops
 without inserting unfinished speech. Setup offers Retry or Cancel if files
 remain in use; it never silently force-closes the app.
 
-This beta 1.02 preview is unsigned. SmartScreen warnings may occur.
+This preview is unsigned. SmartScreen warnings may occur.
 GitHub's Verified badge on source commits does not sign the Windows installer.
 Future releases can be signed using
 a publicly trusted certificate, but clean-machine validation and a Defender
@@ -55,7 +60,7 @@ parakeet.cpp and llama.cpp runtimes: MIT.
 Optional NVIDIA CUDA runtime: NVIDIA redistributable terms.
 Inter, Figtree, EB Garamond and JetBrains Mono: SIL OFL 1.1.
 Lordicon lock animation: user-supplied PRO asset; applicable license required.
-Python, Tcl/Tk, sounddevice, PortAudio, CFFI and WebRTC VAD: upstream licenses.
+Python, Tcl/Tk, sounddevice, PortAudio, CFFI, WebRTC VAD and truststore: upstream licenses.
 Full notices and available license texts are installed with the application.
 
 Developer: https://github.com/ABhattacharya-dev

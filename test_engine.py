@@ -308,13 +308,17 @@ class EngineTests(unittest.TestCase):
                                     "cleanup": {"state": "missing"}}}
             app.update_model_cards()
             self.assertIn("Offline", app.model_widgets["asr"][0].cget("text"))
-            self.assertEqual(app.model_widgets["asr"][2].cget("text"), "Download")
+            self.assertEqual(app.model_widgets["asr"][2].cget("text"), "Retry download")
             app.pill.ready = True
             app.model_widgets["asr"][2].invoke()
             self.assertEqual(app.pill.request.call_args.args[0], "model_download")
             self.assertEqual(app.pill.request.call_args.kwargs["model"], "asr")
             app.model_widgets["cleanup"][3].invoke()
             self.assertTrue(app.pill.request.call_args.kwargs["repair"])
+            app.model = {"models": {"asr": {"state": "failed", "installed": True,
+                                            "error": "Parakeet runtime DLL is missing. Choose Verify / repair."}}}
+            app.update_model_cards()
+            self.assertIn("Parakeet runtime DLL is missing", app.model_widgets["asr"][0].cget("text"))
             app.pill.ready = False
             self.assertEqual(app.settings_apply.winfo_manager(), "")
             self.assertEqual(app.mic_combo.cget("bd"), 0)
@@ -825,6 +829,28 @@ class EngineTests(unittest.TestCase):
         with patch("windows_support.foreground_window", return_value=123):
             with self.assertRaisesRegex(OSError, "focused window changed"):
                 insert_text("hello", expected_window=456)
+
+    def test_snippet_final_text_matches_insertion_and_history(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            terms = root / "personal_terms.json"
+            terms.write_text(json.dumps({"name": "Ada Lovelace", "email": "ada@example.test"}),
+                             encoding="utf-8")
+            self.core.insert = True
+            self.core.record_history = True
+            self.core.recording_ms = 100
+            self.core.target_window = 123
+            self.core.foreground = {"process": "Notepad.exe"}
+            result = Future()
+            result.set_result(("My name is insert my name and my email is insert my email.", 1.0))
+            with (patch.object(engine.stt, "TERMS_FILE", terms),
+                  patch.object(engine.stt, "HISTORY_DIR", root / "history"),
+                  patch.object(engine, "insert_text") as insert):
+                self.core._process([result], time.perf_counter())
+                saved = json.loads(next((root / "history").glob("*.jsonl")).read_text().splitlines()[0])
+            expected = "My name is Ada Lovelace and my email is ada@example.test."
+            insert.assert_called_once_with(expected, 123)
+            self.assertEqual(saved["text"], expected)
 
     def test_pill_placement_uses_taskbar_edge(self):
         screen = wintypes.RECT(-1920, 0, 0, 1080)

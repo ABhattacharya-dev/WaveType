@@ -1,4 +1,6 @@
 import hashlib
+import os
+import ssl
 import tempfile
 import threading
 import unittest
@@ -58,6 +60,20 @@ class DownloadTests(unittest.TestCase):
                 model_manager.fetch(target, "https://example.test/model", hashlib.sha256(b"model").hexdigest())
             self.assertEqual(open_url.call_args.args[0].headers["Range"], "bytes=3-")
             self.assertEqual(target.read_bytes(), b"model")
+
+    def test_download_uses_verified_windows_trust_context(self):
+        context = model_manager._download_context()
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        if os.name == "nt":
+            import truststore
+            self.assertIsInstance(context, truststore.SSLContext)
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "model.gguf"
+            with patch("urllib.request.urlopen", return_value=Response(b"model")) as open_url:
+                model_manager.fetch(target, "https://example.test/model",
+                                    hashlib.sha256(b"model").hexdigest())
+            self.assertIsNotNone(open_url.call_args.kwargs["context"])
 
     def test_range_not_satisfiable_restarts_once(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -128,6 +144,76 @@ class DownloadTests(unittest.TestCase):
                 self.assertTrue(model_manager.asr_library_ready())
                 library.write_bytes(b"corrupt")
                 self.assertFalse(model_manager.asr_library_ready())
+
+    def test_valid_model_with_missing_runtime_is_reported_as_runtime_problem(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "redux-q8_0.gguf").write_bytes(b"model")
+            (root / "parakeet-cli.exe").write_bytes(b"cli")
+            library = root / "parakeet-lib" / "parakeet.dll"
+            with (patch.object(model_manager.stt, "RUNTIME", root),
+                  patch.object(model_manager, "ASR", ("https://example.test/model", hashlib.sha256(b"model").hexdigest())),
+                  patch.object(model_manager, "ASR_LIBRARY_PATH", library)):
+                manager = model_manager.ModelDownloads(lambda _event: None)
+                manager.start("asr", download=False)
+                manager.jobs["asr"].join(3)
+                state = manager.snapshot()["asr"]
+                (root / "redux-q8_0.gguf").write_bytes(b"invalid")
+                invalid_model = model_manager.asr_problem()
+            self.assertEqual(state["state"], "failed")
+            self.assertIn("runtime DLL is missing", state["error"])
+            self.assertIn("model failed verification", invalid_model)
+
+    def test_bundled_runtime_alone_does_not_mark_model_installed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            runtime = root / "parakeet-lib"
+            runtime.mkdir()
+            (runtime / "parakeet.dll").write_bytes(b"library")
+            with patch.object(model_manager.stt, "RUNTIME", root):
+                manager = model_manager.ModelDownloads(lambda _event: None)
+                self.assertFalse(manager._facts("asr")["installed"])
+
+    def test_bundled_runtime_repairs_missing_dll_without_network(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            bundled = root / "bundle" / "runtime"
+            bundled.mkdir(parents=True)
+            (bundled / "parakeet-cli.exe").write_bytes(b"cli")
+            (bundled / "parakeet.dll").write_bytes(b"library")
+            runtime = root / "data"
+            runtime.mkdir()
+            (runtime / "redux-q8_0.gguf").write_bytes(b"model")
+            library = runtime / "parakeet-lib" / "parakeet-v0.6.1-lib-win-cpu-x64" / "parakeet.dll"
+            with (patch.object(model_manager.sys, "frozen", True, create=True),
+                  patch.object(model_manager.sys, "_MEIPASS", str(root / "bundle"), create=True),
+                  patch.object(model_manager.stt, "RUNTIME", runtime),
+                  patch.object(model_manager, "ASR", ("https://example.test/model", hashlib.sha256(b"model").hexdigest())),
+                  patch.object(model_manager, "ASR_LIBRARY_PATH", library),
+                  patch.object(model_manager, "ASR_LIBRARY_DLL_SHA256", hashlib.sha256(b"library").hexdigest()),
+                  patch("urllib.request.urlopen") as open_url):
+                self.assertEqual(model_manager.ensure_asr(), library)
+                (bundled / "parakeet.dll").write_bytes(b"invalid")
+                with self.assertRaisesRegex(ValueError, "Bundled Parakeet runtime DLL failed verification"):
+                    model_manager.ensure_asr()
+            self.assertEqual(library.read_bytes(), b"library")
+            open_url.assert_not_called()
+
+    def test_certificate_failure_identifies_model_or_runtime_download(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "parakeet-cli.exe").write_bytes(b"cli")
+            library = root / "parakeet-lib" / "parakeet.dll"
+            failure = urllib.error.URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+            with (patch.object(model_manager.stt, "RUNTIME", root),
+                  patch.object(model_manager, "ASR", ("https://example.test/model", hashlib.sha256(b"model").hexdigest())),
+                  patch.object(model_manager, "ASR_LIBRARY_PATH", library),
+                  patch("urllib.request.urlopen", side_effect=failure)):
+                with self.assertRaisesRegex(OSError, "Parakeet model download failed.*certificate verify failed"):
+                    model_manager.ensure_asr()
+                (root / "redux-q8_0.gguf").write_bytes(b"model")
+                with self.assertRaisesRegex(OSError, "Parakeet runtime download or installation failed.*certificate verify failed"):
+                    model_manager.ensure_asr()
 
     def test_previous_qwen_runtime_works_offline_until_repair(self):
         with tempfile.TemporaryDirectory() as folder:

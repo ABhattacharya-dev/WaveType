@@ -69,7 +69,7 @@ def manifest(bundle, version):
     require_x64(bundle / "WaveType.exe")
     require_x64(bundle / "engine" / "WaveTypeEngine.exe")
     dependencies = {}
-    for name in ("sounddevice", "cffi", "pycparser", "webrtcvad-wheels"):
+    for name in ("sounddevice", "cffi", "pycparser", "webrtcvad-wheels", "truststore"):
         distribution = importlib.metadata.distribution(name)
         dependencies[name] = distribution.version
         for entry in distribution.files or []:

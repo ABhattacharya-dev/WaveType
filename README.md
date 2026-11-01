@@ -6,20 +6,20 @@
 
 WaveType is a local dictation app for Windows 10 and 11. A floating pill and a **Ctrl+Win** shortcut turn speech into text with Parakeet Redux; optional Qwen Smart cleanup can polish the result before insertion. After the first model downloads, inference runs offline.
 
-**0.1.0-beta1.03.1 (Auto update fix)** repairs the express update handoff and recognizes beta 1 patch releases. Install this release manually from beta1.02 or beta1.03; their published updater cannot complete the handoff. The beta1.03 Assistant features remain available: opt-in **Ctrl+Shift+Win** voice commands and saved app, folder, and website shortcuts. Assistant speech stays local without inserting text and appears in History with **Assistant** as its source.
+**0.1.0-beta1.04 (first-run and Notepad fixes)** bundles the verified Parakeet runtime DLL, uses Windows certificate trust for downloads, and repairs corrupted insertion into Notepad. Beta1.03.1 can discover and install this update from Settings. Beta1.02 and beta1.03 need a manual installer because their published update handoff is broken.
 
 [![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&logoColor=white)](#download-and-install) [![Latest release](https://img.shields.io/github/v/release/ABhattacharya-dev/WaveType?include_prereleases&label=release)](https://github.com/ABhattacharya-dev/WaveType/releases) [![GitHub issues](https://img.shields.io/github/issues/ABhattacharya-dev/WaveType)](https://github.com/ABhattacharya-dev/WaveType/issues) [![License: MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 
-[Download the Windows preview](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta1.03.1) · [See how it works](#how-to-dictate) · [Contribute](#contributing)
+[Download the Windows preview](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta1.04) · [See how it works](#how-to-dictate) · [Contribute](#contributing)
 
 > [!NOTE]
-> The current Windows x64 release is **0.1.0-beta1.03.1**. The installer is unsigned and has not yet been validated on a clean Windows installation or with Microsoft Defender. SmartScreen warnings may occur. GitHub's Verified badge on the release commit confirms its source signature; it does not sign the Windows installer. Keep Windows security protections enabled; see [release status](docs/RELEASE.md).
+> The current Windows x64 release is **0.1.0-beta1.04**. The installer is unsigned and has not yet been validated on a clean Windows installation or with Microsoft Defender. SmartScreen warnings may occur. GitHub's Verified badge on the release commits confirms their source signatures; it does not sign the Windows installer. Keep Windows security protections enabled; see [release status](docs/RELEASE.md).
 
 ## Why WaveType?
 
 | | |
 | --- | --- |
-| **Local transcription** | Parakeet Redux transcribes on your machine. Speech is not uploaded by WaveType; the app downloads verified model and runtime files after installation. |
+| **Local transcription** | Parakeet Redux transcribes on your machine. Speech is not uploaded by WaveType. Builds made from the current source include the required Parakeet runtime DLL; model weights download after installation. |
 | **Dictate into other apps** | Hold **Ctrl+Win** to record and release to insert text into the focused text box. A quick tap locks recording for hands-free speech. |
 | **Optional Smart cleanup** | Qwen3 4B can improve punctuation and grammar, resolve spoken corrections, or format requested JSON. It runs locally and is off by default. |
 | **Personal vocabulary** | Add recognition aliases and deliberate snippets for names, addresses, and phrases. |
@@ -46,16 +46,16 @@ WaveType is a local dictation app for Windows 10 and 11. A floating pill and a *
 
 ## Download and install
 
-1. Download **`WaveType-0.1.0-beta1.03.1-Setup-x64.exe`** from the [beta 1.03.1 release](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta1.03.1). The release also provides SHA-256 checksums.
+1. Download **`WaveType-0.1.0-beta1.04-Setup-x64.exe`** from the [beta 1.04 release](https://github.com/ABhattacharya-dev/WaveType/releases/tag/v0.1.0-beta1.04). The release also provides SHA-256 checksums.
 2. Run the installer on **Intel/AMD x64 Windows 10 or 11**. Python is included; no separate Python or CUDA Toolkit install is needed.
 3. Choose your installation folder and shortcuts. Startup on sign-in is off by default.
 4. Launch WaveType to download Parakeet; manage optional Qwen in Settings.
 
-Installation finishes before model downloads. On first launch, WaveType downloads Parakeet; Qwen remains optional. Settings shows Download, Pause / Resume, Cancel, Verify / repair and Delete model controls when relevant, with progress and per-model disk usage.
+Installation finishes before model downloads. On first launch, WaveType downloads Parakeet model weights; Qwen remains optional. Beta1.04 includes the pinned Parakeet DLL, so a missing DLL is repaired locally. Earlier installers download the DLL separately. Settings shows Download, Pause / Resume, Cancel, Verify / repair and Delete model controls when relevant, with progress and per-model disk usage. See [first-run recovery](docs/FIRST_RUN_RECOVERY.md) if setup reports a model, runtime, or certificate error.
 
 Installed builds that include the updater can check for app updates in Settings. Automatic checking and downloading are off by default; an update always asks before installation. Manual checks are rate limited, and installer downloads can be paused, resumed, or canceled. WaveType verifies the release checksum, then closes, updates, and reopens after approval. See [app update details](docs/UPDATES.md).
 
-The current preview is **0.1.0-beta1.03.1**. See the [short release notes](docs/releases/0.1.0-beta1.03.1.md) for this updater repair. Exit WaveType from the tray before running a downloaded installer manually or uninstalling. In-app updates close the app after approval. Setup checks for files still in use and offers Retry or Cancel; it never force-closes the app.
+The current preview is **0.1.0-beta1.04**. See the [short release notes](docs/releases/0.1.0-beta1.04.md) for these fixes. Exit WaveType from the tray before running a downloaded installer manually or uninstalling. In-app updates close the app after approval. Setup checks for files still in use and offers Retry or Cancel; it never force-closes the app.
 
 Deleting a model removes its downloaded weights, runtimes, cached archives, partial files and verification records. Qwen deletion includes both CPU and GPU runtimes and turns off Smart cleanup. Parakeet deletion makes dictation unavailable until you download it again. Pause, Cancel and intentional deletion are remembered across restarts. The other model and your history, settings and dictionary are preserved. Progress bars appear only while downloading, paused, verifying, deleting, or completing a pause/cancel request.
 
@@ -71,11 +71,11 @@ History stores the final text and date/time as readable local JSON, with the for
 | Click the floating pill | Start locked recording; click again to send. Right-click to cancel. |
 | Right-click the tray icon → **WaveType** | Open History, Dictionary, Settings, and About. Choose **Exit** to stop the app and engine. |
 
-Smart cleanup can be enabled in the tray or Settings. Downloading its model in Settings does not enable it. Windows may block text insertion into elevated apps; if that happens, the final text remains in History. The clipboard is untouched by hotkey insertion.
+Smart cleanup can be enabled in the tray or Settings. Downloading its model in Settings does not enable it. Windows may block text insertion into elevated apps; if that happens, the final text remains in History. Most apps receive Unicode key input without using the clipboard. Notepad uses a short clipboard paste to avoid repeated or missing characters; WaveType restores supported clipboard formats afterward and keeps the temporary text out of Windows clipboard history and cloud sync. If a clipboard format cannot be preserved, insertion stops and the final text remains in History.
 
 ## Run from source
 
-**Requirements:** Windows 10/11, Python 3.12, and internet access for first-run model/runtime downloads.
+**Requirements:** Windows 10/11, Python 3.12, and internet access for first-run model downloads. Source runs may also download the pinned Parakeet runtime DLL.
 
 ```powershell
 git clone https://github.com/ABhattacharya-dev/WaveType.git

@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '0.1.0-beta1.03.1',
+    [string]$Version = '0.1.0-beta1.04',
     [switch]$Sign,
     [string]$SignToolPath = 'signtool.exe',
     [string]$TimestampUrl = 'http://timestamp.digicert.com'
@@ -32,6 +32,8 @@ if (-not (Test-Path -LiteralPath $pyinstaller)) { throw 'Install requirements-bu
 if (-not (Test-Path -LiteralPath $makensis)) { throw 'Install NSIS 3 first.' }
 & $python -c "import struct,sys; sys.exit(0 if struct.calcsize('P') == 8 else 1)"
 if ($LASTEXITCODE -ne 0) { throw 'Build with x64 Python.' }
+& $python packaging\prepare_parakeet_runtime.py
+if ($LASTEXITCODE -ne 0) { throw 'Pinned Parakeet runtime preparation failed.' }
 & $python packaging\release_metadata.py prepare --version $Version
 if ($LASTEXITCODE -ne 0) { throw 'Version metadata failed.' }
 
@@ -39,7 +41,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Version metadata failed.' }
     --icon 'assets\WaveType.ico' --version-file 'build\WaveTypeEngine-version.txt' `
     --exclude-module numpy --exclude-module torch `
     --additional-hooks-dir 'packaging\hooks' `
-    --add-binary 'runtime\parakeet-cli.exe;runtime' engine.py
+    --add-binary 'runtime\parakeet-cli.exe;runtime' `
+    --add-binary 'build\parakeet-runtime\parakeet.dll;runtime' engine.py
 if ($LASTEXITCODE -ne 0) { throw 'Engine bundle failed.' }
 
 & $pyinstaller --noconfirm --clean --noupx --onedir --windowed --name WaveType `

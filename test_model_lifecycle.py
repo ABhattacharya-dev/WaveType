@@ -137,6 +137,15 @@ class LifecycleTests(unittest.TestCase):
         self.manager._set("asr", state="failed")
         self.assertEqual(self.manager.snapshot()["asr"]["disk_bytes"], 6)
 
+    def test_failed_first_model_download_with_bundled_runtime_offers_retry(self):
+        from desktop import model_controls
+        self.file("parakeet-lib/parakeet.dll", b"verified runtime")
+        with patch.object(mm, "ensure_asr", side_effect=OSError("Parakeet model download failed: certificate verify failed")):
+            self.manager.start("asr")
+            state = self.wait("asr")
+        self.assertFalse(state["installed"])
+        self.assertEqual(model_controls(state), ("retry",))
+
 
 class ControlTests(unittest.TestCase):
     def test_controls_for_each_model_state(self):
@@ -145,6 +154,7 @@ class ControlTests(unittest.TestCase):
                  ({"state": "downloading"}, ("pause", "cancel")),
                  ({"state": "paused"}, ("resume", "cancel")),
                  ({"state": "failed", "partial": True}, ("resume", "cancel")),
+                 ({"state": "failed"}, ("retry",)),
                  ({"state": "ready"}, ("verify", "delete")),
                  ({"state": "failed", "installed": True}, ("verify", "delete")),
                  ({"state": "verifying", "operation": "verify"}, ()),

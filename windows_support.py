@@ -17,6 +17,26 @@ if os.name == "nt":
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     user32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
     user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
+    user32.OpenClipboard.argtypes = [wintypes.HWND]
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    user32.SetClipboardData.restype = wintypes.HANDLE
+    user32.EnumClipboardFormats.argtypes = [wintypes.UINT]
+    user32.EnumClipboardFormats.restype = wintypes.UINT
+    user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
+    user32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
+    user32.RegisterClipboardFormatW.restype = wintypes.UINT
+    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = wintypes.HANDLE
+    kernel32.GlobalLock.argtypes = [wintypes.HANDLE]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalSize.argtypes = [wintypes.HANDLE]
+    kernel32.GlobalSize.restype = ctypes.c_size_t
+    kernel32.GlobalFree.argtypes = [wintypes.HANDLE]
+    kernel32.GlobalFree.restype = wintypes.HANDLE
     user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
@@ -104,11 +124,133 @@ def foreground_window():
     return user32.GetForegroundWindow() if os.name == "nt" else None
 
 
+def _clipboard_open(window):
+    for _ in range(20):
+        if user32.OpenClipboard(window):
+            return
+        time.sleep(0.025)
+    raise OSError("Notepad needs the clipboard for reliable insertion, but it is busy")
+
+
+def _clipboard_snapshot():
+    _clipboard_open(None)
+    try:
+        sequence = user32.GetClipboardSequenceNumber()
+        saved = []
+        format_id = 0
+        while True:
+            ctypes.set_last_error(0)
+            format_id = user32.EnumClipboardFormats(format_id)
+            if not format_id:
+                if ctypes.get_last_error():
+                    raise ctypes.WinError(ctypes.get_last_error())
+                break
+            if format_id in (2, 3, 9, 14):  # GDI handles are not movable memory.
+                raise OSError("Clipboard contains a format WaveType cannot preserve; "
+                              "paste the result from History instead")
+            handle = user32.GetClipboardData(format_id)
+            size = kernel32.GlobalSize(handle) if handle else 0
+            pointer = kernel32.GlobalLock(handle) if size else None
+            if not pointer:
+                raise OSError("Clipboard contains a format WaveType cannot preserve; "
+                              "paste the result from History instead")
+            try:
+                saved.append((format_id, ctypes.string_at(pointer, size)))
+            finally:
+                kernel32.GlobalUnlock(handle)
+        if user32.GetClipboardSequenceNumber() != sequence:
+            raise OSError("Clipboard changed during insertion; retry dictation")
+        return saved, sequence
+    finally:
+        user32.CloseClipboard()
+
+
+def _clipboard_set(window, formats):
+    handles = []
+    try:
+        for format_id, value in formats:
+            handle = kernel32.GlobalAlloc(0x0002, len(value))  # GMEM_MOVEABLE
+            if not handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+            handles.append((format_id, handle))
+            pointer = kernel32.GlobalLock(handle)
+            if not pointer:
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                ctypes.memmove(pointer, value, len(value))
+            finally:
+                kernel32.GlobalUnlock(handle)
+        _clipboard_open(window)
+        try:
+            if not user32.EmptyClipboard():
+                raise ctypes.WinError(ctypes.get_last_error())
+            for format_id, handle in list(handles):
+                if not user32.SetClipboardData(format_id, handle):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                handles.remove((format_id, handle))
+        finally:
+            user32.CloseClipboard()
+    finally:
+        for _, handle in handles:
+            kernel32.GlobalFree(handle)
+
+
+def _paste_notepad(text, expected_window):
+    saved, previous_sequence = _clipboard_snapshot()  # Fail before changing unsupported formats.
+    window = foreground_window()
+    if expected_window is not None and window != expected_window:
+        raise OSError("focused window changed during dictation")
+    if user32.GetClipboardSequenceNumber() != previous_sequence:
+        raise OSError("Clipboard changed during insertion; retry dictation")
+    exclusion = user32.RegisterClipboardFormatW("ExcludeClipboardContentFromMonitorProcessing")
+    if not exclusion:
+        raise ctypes.WinError(ctypes.get_last_error())
+    changed = False
+    sequence = None
+    try:
+        changed = True
+        _clipboard_set(window, [(13, text.encode("utf-16-le") + b"\0\0"),
+                                (exclusion, b"\0\0\0\0")])
+        sequence = user32.GetClipboardSequenceNumber()
+        if expected_window is not None and foreground_window() != expected_window:
+            raise OSError("focused window changed during dictation")
+        if user32.GetClipboardSequenceNumber() != sequence:
+            raise OSError("Clipboard changed during insertion; retry dictation")
+        keys = (INPUT * 4)()
+        for event in keys:
+            event.type = 1
+        keys[0].ki = KEYBDINPUT(0x11, 0, 0, 0, 0)
+        keys[1].ki = KEYBDINPUT(0x56, 0, 0, 0, 0)
+        keys[2].ki = KEYBDINPUT(0x56, 0, 0x0002, 0, 0)
+        keys[3].ki = KEYBDINPUT(0x11, 0, 0x0002, 0, 0)
+        sent = user32.SendInput(4, ctypes.byref(keys), ctypes.sizeof(INPUT))
+        if sent != 4:
+            raise OSError(f"SendInput sent {sent}/4 paste key events; elevated windows may block input")
+        time.sleep(0.2)  # Let Notepad read the clipboard before restoring it.
+    finally:
+        if changed and (sequence is None or user32.GetClipboardSequenceNumber() == sequence):
+            _clipboard_set(window, saved)
+
+
 def insert_text(text, expected_window=None):
     if os.name != "nt":
         raise OSError("text insertion requires Windows")
     if expected_window is not None and foreground_window() != expected_window:
         raise OSError("focused window changed during dictation")
+    # SendInput does not release physical modifiers; the dictation hotkey may
+    # still have Ctrl or Win held when the recording is released.
+    deadline = time.monotonic() + 0.5
+    while any(user32.GetAsyncKeyState(key) & 0x8000 for key in (0x10, 0x11, 0x12, 0x5B, 0x5C)):
+        if time.monotonic() >= deadline:
+            raise OSError("release modifier keys before inserting text")
+        time.sleep(0.01)
+    if expected_window is not None and foreground_window() != expected_window:
+        raise OSError("focused window changed during dictation")
+    if not text:
+        return
+    if ((foreground_app() or {}).get("process") or "").casefold() == "notepad.exe":
+        _paste_notepad(text, expected_window)
+        return
     raw = text.encode("utf-16-le")
     items = (INPUT * len(raw))()
     for offset in range(0, len(raw), 2):
@@ -117,10 +259,11 @@ def insert_text(text, expected_window=None):
         items[i].type = items[i + 1].type = 1
         items[i].ki = KEYBDINPUT(0, code, 0x0004, 0, 0)
         items[i + 1].ki = KEYBDINPUT(0, code, 0x0006, 0, 0)
-    if items:
-        sent = user32.SendInput(len(items), ctypes.byref(items), ctypes.sizeof(INPUT))
-        if sent != len(items):
-            raise OSError(f"SendInput sent {sent}/{len(items)} key events; elevated windows may block input")
+    if expected_window is not None and foreground_window() != expected_window:
+        raise OSError("focused window changed during dictation")
+    sent = user32.SendInput(len(items), ctypes.byref(items), ctypes.sizeof(INPUT))
+    if sent != len(items):
+        raise OSError(f"SendInput sent {sent}/{len(items)} key events; elevated windows may block input")
 
 
 def foreground_app():
