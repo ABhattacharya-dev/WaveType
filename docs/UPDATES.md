@@ -6,6 +6,8 @@ Automatic mode downloads a newer beta 1 Windows x64 installer, then asks before 
 
 Once approved, WaveType shuts down its engine, closes, runs the verified installer silently with its update-only option, and reopens. The update retains the installed location, current Start Menu and desktop shortcut choices, startup-on-sign-in choice, and all local models and personal data. The updater reports an installer failure on the next launch. The update-only option requires an existing installation; normal setup still shows the installation wizard.
 
+The published beta1.02 and beta1.03 builds have a broken express-update handoff: after approval, the app can close without installing or reopening. If this happens, exit WaveType from the tray if it is still running, then run the newer published installer from [GitHub Releases](https://github.com/ABhattacharya-dev/WaveType/releases) manually. Normal setup upgrades the existing installation and keeps local models and personal data. This handoff is fixed in source for a subsequent build; the published installers are unchanged.
+
 Release maintainers must publish `WaveType-VERSION-Setup-x64.exe` and `SHA256SUMS.txt` together. The checksum file must contain the installer's exact filename and SHA-256. Release checks and installer downloads use HTTPS to GitHub. Dictation audio and text are not sent to GitHub. The installer is currently unsigned, so Windows may still show its usual publisher or SmartScreen warning; checksum verification does not replace code signing.
 
 ## Validation

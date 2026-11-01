@@ -2,7 +2,9 @@
 
 import hashlib
 import io
+import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -101,7 +103,31 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual((data / "update-helper.ps1").read_bytes(),
                              (Path(desktop.__file__).parent / "packaging" / "update_helper.ps1").read_bytes())
             self.assertIn(str(data / "update-helper.ps1"), launch.call_args.args[0])
+            self.assertEqual(launch.call_args.kwargs["creationflags"], subprocess.CREATE_NO_WINDOW)
             app.quit.assert_called_once()
+
+    @unittest.skipUnless(os.name == "nt", "Windows update helper")
+    def test_windowless_helper_records_hash_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installer = root / "update.exe"
+            installer.write_bytes(b"changed after download")
+            result = root / "result.json"
+            helper = Path(__file__).parent / "packaging" / "update_helper.ps1"
+            powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / \
+                "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            process = subprocess.Popen(
+                [str(powershell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                 "-File", str(helper), "-Installer", str(installer), "-InstallDir", str(root),
+                 "-AppPid", "999999", "-ExpectedSha256", "0" * 64, "-ResultFile", str(result)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            self.assertEqual(process.wait(timeout=15), 0)
+            self.assertEqual(json.loads(result.read_text(encoding="utf-8-sig")), {
+                "status": "failed",
+                "message": "The downloaded installer changed after verification. The update was not installed.",
+            })
 
 
 if __name__ == "__main__":
