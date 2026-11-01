@@ -673,7 +673,7 @@ class DictationEngine:
                 self.assistant_session = assistant_requested
                 if self.assistant_session:
                     self.insert = False
-                self.record_history = not self.assistant_session
+                self.record_history = True
                 self._state("locked" if self.mode == "tap" or click else "recording")
                 if self.smart_enabled and not self.assistant_session and self.cleaner is None:
                     self.cleaner_future = self.executor.submit(self._ensure_cleaner)
@@ -811,7 +811,8 @@ class DictationEngine:
             if self.record_history:
                 try:
                     record = history_append(stt.HISTORY_DIR,
-                                            {"text": final, "app": (self.foreground or {}).get("process", "")})
+                                            {"text": final, "app": ("Assistant" if self.assistant_session else
+                                                                     (self.foreground or {}).get("process", ""))})
                     if record:
                         self.emit("history_added", {"id": record["id"]})
                 except OSError as exc:

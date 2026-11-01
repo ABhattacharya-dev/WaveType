@@ -808,7 +808,8 @@ class DesktopApp:
 
     def show_history(self):
         if not self.history:
-            self.label(self.body, "Your dictations will appear here.", 10, color="muted").pack(anchor="w")
+            self.label(self.body, "Your dictations and Assistant commands will appear here.", 10,
+                       color="muted").pack(anchor="w")
             return
         inside = self.scroll_area(self.body)
         current_date = None

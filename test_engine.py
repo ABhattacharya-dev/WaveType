@@ -150,7 +150,9 @@ class EngineTests(unittest.TestCase):
             app.body.pack(fill="both", expand=True)
             app.history = [{"id": "x", "date": date.today().isoformat(),
                             "time": "13:10:00", "text": "Text", "app": "ChatGPT.exe",
-                            "raw": "Do not display this"}]
+                            "raw": "Do not display this"},
+                           {"id": "y", "date": date.today().isoformat(),
+                            "time": "13:11:00", "text": "Open project.", "app": "Assistant"}]
             app.show_history()
             root.update()
             canvas = next(widget for widget in app.body.winfo_children() if isinstance(widget, tk.Canvas))
@@ -162,6 +164,10 @@ class EngineTests(unittest.TestCase):
             actions, source = [widget for widget in row.winfo_children() if isinstance(widget, tk.Frame)]
             self.assertEqual(labels + [source.winfo_children()[0].cget("text")],
                              ["1:10", "Text", "ChatGPT.exe"])
+            assistant_row = inside.winfo_children()[1].winfo_children()[2]
+            assistant_source = [widget for widget in assistant_row.winfo_children()
+                                if isinstance(widget, tk.Frame)][1]
+            self.assertEqual(assistant_source.winfo_children()[0].cget("text"), "Assistant")
             delete = next(widget for widget in actions.winfo_children()
                           if isinstance(widget, tk.Label) and widget.cget("image"))
             self.assertEqual(delete.winfo_manager(), "")
@@ -541,7 +547,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.core.state, "locked")
         self.assertTrue(self.core.assistant_session)
         self.assertFalse(self.core.insert)
-        self.assertFalse(self.core.record_history)
+        self.assertTrue(self.core.record_history)
         self.core.command("cancel", {})
 
     def test_either_chord_finishes_locked_assistant(self):
@@ -562,7 +568,7 @@ class EngineTests(unittest.TestCase):
                 self.assertFalse(self.core.hotkey_pending_finish)
         self.core.command("cancel", {})
 
-    def test_assistant_transcript_has_no_cleanup_insertion_or_history(self):
+    def test_assistant_transcript_skips_cleanup_and_insertion_and_records_assistant_source(self):
         events = []
         self.core.listeners.add(events.append)
         with self.assertRaisesRegex(ValueError, "Enable Assistant"):
@@ -573,16 +579,21 @@ class EngineTests(unittest.TestCase):
             self.core.command("press", {"assistant": True, "insert": True})
         cleaner.assert_not_called()
         self.assertTrue(self.core.assistant_session)
+        self.assertTrue(self.core.record_history)
+        self.core.foreground = {"process": "Notepad.exe"}
         result = Future()
         result.set_result(("Open Chrome.", 1.0))
         self.core.recording_ms = 100
-        with (patch.object(engine.stt, "format_transcript") as format_text,
-              patch.object(engine, "history_append") as history,
+        with (tempfile.TemporaryDirectory() as temporary,
+              patch.object(engine.stt, "HISTORY_DIR", Path(temporary)),
+              patch.object(engine.stt, "format_transcript") as format_text,
               patch.object(engine, "insert_text") as insert):
             self.core._process([result], time.perf_counter())
+            saved = json.loads(next(Path(temporary).glob("*.jsonl")).read_text().splitlines()[0])
         format_text.assert_not_called()
-        history.assert_not_called()
         insert.assert_not_called()
+        self.assertEqual((saved["text"], saved["app"]), ("Open Chrome.", "Assistant"))
+        self.assertTrue(any(event["event"] == "history_added" for event in events))
         self.assertIn({"event": "assistant_feedback", "value": "Not Found"}, events)
         self.assertEqual(self.core.state, "idle")
         self.assertFalse(self.core.assistant_session)

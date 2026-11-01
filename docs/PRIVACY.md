@@ -34,11 +34,11 @@ Date and time
 
 Final text
 
-Foreground process name
+Foreground process name for dictation, or Assistant for Assistant commands
 
 Personal dictionary files, history, and saved shortcut nicknames and targets are stored as local JSON and are not encrypted. Installed builds keep shortcuts in `%LOCALAPPDATA%\STTCore\shortcuts.json`; source runs use an ignored `shortcuts.json` beside the source code. Shortcuts are kept on uninstall unless **Also delete all local data** is selected.
 
-The keyboard hook handles Ctrl+Win and, when Assistant is enabled in Settings, Ctrl+Shift+Win. Ordinary keystrokes are not written to a key log. Assistant speech is transcribed locally without Smart cleanup, text insertion, or a history entry. A complete `open <nickname>` command launches a saved local app or opens a saved local folder in Explorer; website actions remain stored without launching.
+The keyboard hook handles Ctrl+Win and, when Assistant is enabled in Settings, Ctrl+Shift+Win. Ordinary keystrokes are not written to a key log. Assistant speech is transcribed locally without Smart cleanup or text insertion. Its final text is saved in local History with **Assistant** as the source, never the foreground app name; empty transcripts are not saved. A complete `open <nickname>` command launches a saved local app or opens a saved local folder in Explorer; website actions remain stored without launching.
 
 Local Data and Uninstallation
 
