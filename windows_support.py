@@ -164,6 +164,8 @@ class Hotkey:
         self.keys = set(keys)
         self.down = set()
         self.active = False
+        self.assistant_enabled = False
+        self.active_assistant = False
         self.interrupted = False
         self.consume_win_up = False
         self.pressed_at = 0.0
@@ -183,25 +185,34 @@ class Hotkey:
     def _on_key(self, vk, scan, flags, message):
         if flags & 0x10:  # Ignore our injected replacement key-up.
             return False
-        key = {0xA2: 0x11, 0xA3: 0x11, 0x5C: 0x5B}.get(vk, vk)
+        key = {0xA0: 0x10, 0xA1: 0x10, 0xA2: 0x11, 0xA3: 0x11,
+               0x5C: 0x5B}.get(vk, vk)
         if message in (0x100, 0x104):
-            if self.consume_win_up and key not in self.keys:
+            if self.consume_win_up and key not in self.keys and key != 0x10:
                 self.consume_win_up = False
             self.down.add(key)
-            if self.active and key not in self.keys:
+            if self.active and key == 0x10 and self.assistant_enabled and not self.active_assistant:
+                self.active_assistant = True
+                self.pressed_at = time.monotonic()
+                self.callback("assistant_switch", 0)
+            elif self.active and key not in self.keys and key != 0x10:
                 self.active = False
                 self.interrupted = True
-                self.callback("abort", 0)
+                self.callback("assistant_abort" if self.active_assistant else "abort", 0)
             elif key in self.keys and not self.active and not self.interrupted and self.keys <= self.down:
                 self.active = True
+                self.active_assistant = self.assistant_enabled and 0x10 in self.down
                 self.pressed_at = time.monotonic()
-                self.callback("press", 0)
+                self.callback("assistant_press" if self.active_assistant else "press", 0)
         elif message in (0x101, 0x105):
-            if self.active and key in self.keys and key in self.down:
+            if self.active and key in self.down and (key in self.keys or
+                                                     key == 0x10 and self.active_assistant):
                 self.consume_win_up = 0x5B in self.down
                 self.down.discard(key)
                 self.active = False
-                self.callback("release", (time.monotonic() - self.pressed_at) * 1000)
+                self.interrupted = key == 0x10 and self.keys <= self.down
+                self.callback("assistant_release" if self.active_assistant else "release",
+                              (time.monotonic() - self.pressed_at) * 1000)
             else:
                 self.down.discard(key)
                 if key in self.keys and not self.keys <= self.down:

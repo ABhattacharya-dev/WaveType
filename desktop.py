@@ -195,7 +195,8 @@ class DesktopApp:
         self.pill = Pill(smart=bool(self.preferences.get("smart", False)),
                          tap_threshold_ms=int(self.preferences.get("tap_threshold_ms", 250)),
                          settings={"tier": self.preferences.get("tier", "auto"),
-                                   "language": "auto", "microphone": self.preferences.get("microphone")},
+                                   "language": "auto", "microphone": self.preferences.get("microphone"),
+                                   "assistant_enabled": bool(self.preferences.get("assistant_enabled", False))},
                          on_event=self.on_engine_event, on_window_message=self.on_window_message,
                          engine_job=self.engine_job)
         self.root = self.pill.root
@@ -1016,6 +1017,7 @@ class DesktopApp:
 
     def settings_values(self):
         return {"smart": self.smart_var.get(), "login": self.login_var.get(),
+                "assistant_enabled": self.assistant_var.get(),
                 "tier": self.tier_var.get(), "theme": self.theme_var.get(),
                 "threshold": self.threshold_var.get(), "microphone": self.mic_var.get()}
 
@@ -1034,6 +1036,7 @@ class DesktopApp:
             self.update_state = {"state": "idle"}
         inside = self.scroll_area(self.body)
         self.smart_var = tk.BooleanVar(value=bool(self.preferences.get("smart", False)))
+        self.assistant_var = tk.BooleanVar(value=bool(self.preferences.get("assistant_enabled", False)))
         self.login_var = tk.BooleanVar(value=login_enabled())
         self.tier_var = tk.StringVar(value=self.preferences.get("tier", "auto"))
         self.theme_var = tk.StringVar(value=self.theme)
@@ -1045,7 +1048,7 @@ class DesktopApp:
         self.settings_apply = self.button(self.header, "Apply settings", self.apply_settings,
                                           primary=True)
         self.settings_initial = self.settings_values()
-        for variable in (self.smart_var, self.login_var, self.tier_var, self.theme_var,
+        for variable in (self.smart_var, self.assistant_var, self.login_var, self.tier_var, self.theme_var,
                          self.threshold_var, self.mic_var):
             variable.trace_add("write", self.update_apply_visibility)
         card = tk.Frame(inside, bg=self.colors["subtle"], padx=18, pady=6,
@@ -1054,6 +1057,7 @@ class DesktopApp:
         card.pack(fill="x")
         settings = (
             ("Hotkey", "Press and hold or tap to lock recording mode", "hotkey"),
+            ("Assistant", "Ctrl + Shift + Win · hold or tap for local voice actions", "assistant"),
             ("Tap threshold (ms)", "Time window between tapping and holding", "threshold"),
             ("Microphone", "Active input device for local dictation", "microphone"),
             ("Model / hardware tier", "Choose automatic GPU detection or CPU mode", "tier"),
@@ -1107,7 +1111,8 @@ class DesktopApp:
                     self.theme_buttons[value] = button
                 self.choose_theme(self.theme_var.get())
             else:
-                variable = self.smart_var if control == "smart" else self.login_var
+                variable = {"smart": self.smart_var, "assistant": self.assistant_var,
+                            "login": self.login_var}[control]
                 toggle = tk.Canvas(row, width=44, height=24, bg=self.colors["subtle"],
                                    highlightthickness=0, cursor="hand2")
                 toggle.pack(side="right")
@@ -1390,11 +1395,13 @@ class DesktopApp:
         mic = self.mic_var.get()
         microphone = None if mic == "Default" else int(mic.split(":", 1)[0])
         preference = {"smart": self.smart_var.get(), "tier": self.tier_var.get(),
+                      "assistant_enabled": self.assistant_var.get(),
                       "theme": self.theme_var.get(), "tap_threshold_ms": threshold,
                       "microphone": microphone}
         self.pill.request("settings", lambda _result, error: self.after_settings(preference, error),
                           smart=preference["smart"], tier=preference["tier"],
-                          tap_threshold_ms=threshold, microphone=microphone, language="auto")
+                           tap_threshold_ms=threshold, microphone=microphone, language="auto",
+                           assistant_enabled=preference["assistant_enabled"])
 
     def after_settings(self, preference, error):
         if error:

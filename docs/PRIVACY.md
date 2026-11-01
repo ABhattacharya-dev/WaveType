@@ -38,7 +38,7 @@ Foreground process name
 
 Personal dictionary files and history are stored as local JSON and are not encrypted.
 
-The keyboard hook handles the Ctrl+Win chord. Ordinary keystrokes are not written to a key log.
+The keyboard hook handles Ctrl+Win and, when Assistant is enabled in Settings, Ctrl+Shift+Win. Ordinary keystrokes are not written to a key log. Assistant speech is transcribed locally without Smart cleanup, text insertion, or a history entry. Stage 1 does not launch apps, folders, or websites.
 
 Local Data and Uninstallation
 

@@ -44,6 +44,7 @@ class EngineTests(unittest.TestCase):
         core = engine.DictationEngine.__new__(engine.DictationEngine)
         core.state = "idle"
         core.mode = "hold"
+        core.assistant_session = False
         core.level = 0.5
         core.stopping = threading.Event()
         core.level_wakeup = threading.Event()
@@ -284,11 +285,14 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(app.theme_var.get(), "Dark")
             self.assertEqual(app.settings_apply.winfo_manager(), "pack")
             app.tray_smart_var = tk.BooleanVar(master=root, value=False)
+            app.assistant_var.set(True)
             app.apply_settings()
+            self.assertTrue(app.pill.request.call_args.kwargs["assistant_enabled"])
             with patch("desktop.set_login"), patch.object(app, "save_preferences") as save_preferences:
                 app.pill.request.call_args.args[1]({}, None)
                 save_preferences.assert_called_once()
             self.assertEqual(app.preferences["theme"], "Dark")
+            self.assertTrue(app.preferences["assistant_enabled"])
             self.assertEqual(app.settings_apply.winfo_manager(), "")
             self.assertEqual(app.main.winfo_children()[0].cget("bg"), DARK["bg"])
             self.assertEqual(app.model_icon("download").get(8, 2), (244, 240, 233))
@@ -362,6 +366,47 @@ class EngineTests(unittest.TestCase):
         self.core.hotkey_events.join()
         self.assertEqual(self.core.state, "locked")
         self.core.command("cancel", {})
+
+    def test_assistant_switches_active_dictation_and_locks_on_tap(self):
+        self.core.command("settings", {"mode": "hybrid", "assistant_enabled": True})
+        self.core.hotkey_enabled = True
+        self.core._hotkey("press", 0)
+        self.core.hotkey_events.join()
+        self.assertEqual(self.core.state, "recording")
+        self.assertFalse(self.core.assistant_session)
+        self.core._hotkey("assistant_switch", 0)
+        self.core._hotkey("assistant_release", 10)
+        self.core.hotkey_events.join()
+        self.assertEqual(self.core.state, "locked")
+        self.assertTrue(self.core.assistant_session)
+        self.assertFalse(self.core.insert)
+        self.assertFalse(self.core.record_history)
+        self.core.command("cancel", {})
+
+    def test_assistant_transcript_has_no_cleanup_insertion_or_history(self):
+        events = []
+        self.core.listeners.add(events.append)
+        with self.assertRaisesRegex(ValueError, "Enable Assistant"):
+            self.core.command("press", {"assistant": True})
+        self.core.command("settings", {"assistant_enabled": True})
+        self.core.smart_enabled = True
+        with patch.object(self.core, "_ensure_cleaner") as cleaner:
+            self.core.command("press", {"assistant": True, "insert": True})
+        cleaner.assert_not_called()
+        self.assertTrue(self.core.assistant_session)
+        result = Future()
+        result.set_result(("Open Chrome.", 1.0))
+        self.core.recording_ms = 100
+        with (patch.object(engine.stt, "format_transcript") as format_text,
+              patch.object(engine, "history_append") as history,
+              patch.object(engine, "insert_text") as insert):
+            self.core._process([result], time.perf_counter())
+        format_text.assert_not_called()
+        history.assert_not_called()
+        insert.assert_not_called()
+        self.assertIn({"event": "assistant_feedback", "value": "Not Found"}, events)
+        self.assertEqual(self.core.state, "idle")
+        self.assertFalse(self.core.assistant_session)
 
     def test_asr_loads_at_recording_and_unloads_after_idle(self):
         fake_asr = Mock()
@@ -522,6 +567,30 @@ class EngineTests(unittest.TestCase):
             pill.animation_start -= 1
             pill._place()
             self.assertEqual(pill.visual_size, pill_size("recording"))
+        finally:
+            pill.root.after_cancel(pill.tick_after)
+            pill.root.destroy()
+
+    def test_assistant_pill_uses_lime_waveform_and_not_found_feedback(self):
+        if os.name != "nt":
+            self.skipTest("Windows only")
+        with patch.object(Pill, "_connect"):
+            pill = Pill()
+        try:
+            pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "state", "value": "recording", "assistant": True})
+            pill._tick()
+            self.assertTrue(pill.assistant)
+            self.assertEqual(pill.canvas.itemcget(pill.bars[0], "fill"), "#A3E635")
+            pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "state", "value": "idle", "assistant": False})
+            pill.messages.put({"event": "assistant_feedback", "value": "Not Found"})
+            pill._tick()
+            self.assertEqual(pill.canvas.itemcget(pill.shapes["text"], "text"), "Not Found")
+            pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "state", "value": "recording", "assistant": False})
+            pill._tick()
+            self.assertEqual(pill.canvas.itemcget(pill.bars[0], "fill"), "white")
         finally:
             pill.root.after_cancel(pill.tick_after)
             pill.root.destroy()
@@ -744,6 +813,38 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(events, ["press", "abort"])
             self.assertFalse(hotkey._on_key(0x5B, 0, 0, 0x101))
             consume.assert_not_called()
+
+    def test_assistant_hotkey_shift_order_and_disabled_fallback(self):
+        events = []
+        hotkey = Hotkey(lambda action, held: events.append(action))
+        hotkey.assistant_enabled = True
+        with patch("windows_support.consume_win_keyup", return_value=True) as consume:
+            for key in (0x10, 0x11, 0x5B):
+                hotkey._on_key(key, 0, 0, 0x100)
+            self.assertEqual(events, ["assistant_press"])
+            for key in (0x10, 0x11, 0x5B):
+                hotkey._on_key(key, 0, 0, 0x101)
+            self.assertEqual(events, ["assistant_press", "assistant_release"])
+            consume.assert_called_once_with(0x5B, 0)
+        events.clear()
+        hotkey.assistant_enabled = False
+        for key in (0x10, 0x11, 0x5B):
+            hotkey._on_key(key, 0, 0, 0x100)
+        self.assertEqual(events, ["press"])
+        for key in (0x5B, 0x11, 0x10):
+            hotkey._on_key(key, 0, 0, 0x101)
+
+    def test_assistant_hotkey_switches_after_ctrl_win(self):
+        events = []
+        hotkey = Hotkey(lambda action, held: events.append(action))
+        hotkey.assistant_enabled = True
+        with patch("windows_support.consume_win_keyup", return_value=True):
+            for key in (0x11, 0x5B, 0x10):
+                hotkey._on_key(key, 0, 0, 0x100)
+            self.assertEqual(events, ["press", "assistant_switch"])
+            for key in (0x5B, 0x10, 0x11):
+                hotkey._on_key(key, 0, 0, 0x101)
+            self.assertEqual(events, ["press", "assistant_switch", "assistant_release"])
 
 
 if __name__ == "__main__":

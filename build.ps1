@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '0.1.0-beta1.02',
+    [string]$Version = '0.1.0-beta1.03',
     [switch]$Sign,
     [string]$SignToolPath = 'signtool.exe',
     [string]$TimestampUrl = 'http://timestamp.digicert.com'
