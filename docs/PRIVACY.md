@@ -38,7 +38,7 @@ Foreground process name
 
 Personal dictionary files, history, and saved shortcut nicknames and targets are stored as local JSON and are not encrypted. Installed builds keep shortcuts in `%LOCALAPPDATA%\STTCore\shortcuts.json`; source runs use an ignored `shortcuts.json` beside the source code. Shortcuts are kept on uninstall unless **Also delete all local data** is selected.
 
-The keyboard hook handles Ctrl+Win and, when Assistant is enabled in Settings, Ctrl+Shift+Win. Ordinary keystrokes are not written to a key log. Assistant speech is transcribed locally without Smart cleanup, text insertion, or a history entry. A complete `open <app nickname>` command launches the saved local app through Windows; folder and website actions remain stored without launching.
+The keyboard hook handles Ctrl+Win and, when Assistant is enabled in Settings, Ctrl+Shift+Win. Ordinary keystrokes are not written to a key log. Assistant speech is transcribed locally without Smart cleanup, text insertion, or a history entry. A complete `open <nickname>` command launches a saved local app or opens a saved local folder in Explorer; website actions remain stored without launching.
 
 Local Data and Uninstallation
 

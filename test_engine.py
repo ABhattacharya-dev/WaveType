@@ -593,13 +593,13 @@ class EngineTests(unittest.TestCase):
             target.touch()
             self.core.shortcuts = {
                 "Google   Chrome": {"type": "app", "target": str(target)},
-                "Project": {"type": "directory", "target": temporary},
+                "YouTube": {"type": "url", "target": "https://www.youtube.com/"},
             }
             with patch.object(engine.os, "startfile", create=True) as launch:
                 self.assertIsNone(self.core._assistant_action("OPEN google chrome!"))
                 launch.assert_called_once_with(target)
                 for spoken in ("open google chrome please", "please open google chrome",
-                               "open project", "open unknown", "open"):
+                               "open youtube", "open unknown", "open"):
                     with self.subTest(spoken=spoken):
                         self.assertEqual(self.core._assistant_action(spoken), "Not Found")
                 launch.assert_called_once()
@@ -629,6 +629,55 @@ class EngineTests(unittest.TestCase):
             launch.assert_called_once_with(target)
             self.assertTrue(any(event["event"] == "result" for event in events))
             self.assertFalse(any(event["event"] == "assistant_feedback" for event in events))
+
+    def test_assistant_opens_only_existing_saved_folders_in_explorer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary) / "Code Projects"
+            folder.mkdir()
+            file = Path(temporary) / "Not a folder.txt"
+            file.touch()
+            self.core.shortcuts = {
+                "My   Project": {"type": "directory", "target": str(folder)},
+                "Wrong Type": {"type": "directory", "target": str(file)},
+            }
+            with patch.object(engine.os, "startfile", create=True) as launch:
+                self.assertIsNone(self.core._assistant_action("OPEN my project!"))
+                launch.assert_called_once_with(folder, "explore")
+                for spoken in ("open my project please", "open wrong type", "open project"):
+                    with self.subTest(spoken=spoken):
+                        self.assertEqual(self.core._assistant_action(spoken), "Not Found")
+                launch.assert_called_once()
+                folder.rmdir()
+                self.assertEqual(self.core._assistant_action("open my project."), "Not Found")
+                launch.assert_called_once()
+                folder.mkdir()
+                launch.side_effect = OSError("rejected")
+                self.assertEqual(self.core._assistant_action("open my project"), "Open failed")
+                launch.side_effect = FileNotFoundError()
+                self.assertEqual(self.core._assistant_action("open my project"), "Not Found")
+
+    def test_assistant_folder_command_emits_missing_feedback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary) / "Code"
+            folder.mkdir()
+            self.core.shortcuts = {"Project": {"type": "directory", "target": str(folder)}}
+            self.core.assistant_session = True
+            self.core.record_history = False
+            self.core.recording_ms = 100
+            result = Future()
+            result.set_result(("Open project.", 1.0))
+            events = []
+            self.core.listeners.add(events.append)
+            with patch.object(engine.os, "startfile", create=True) as launch:
+                self.core._process([result], time.perf_counter())
+                launch.assert_called_once_with(folder, "explore")
+                self.assertFalse(any(event["event"] == "assistant_feedback" for event in events))
+                folder.rmdir()
+                events.clear()
+                self.core.assistant_session = True
+                self.core._process([result], time.perf_counter())
+                launch.assert_called_once()
+            self.assertIn({"event": "assistant_feedback", "value": "Not Found"}, events)
 
     def test_assistant_reports_app_launch_rejection_in_pill(self):
         with tempfile.TemporaryDirectory() as temporary:
