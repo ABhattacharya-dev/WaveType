@@ -58,6 +58,9 @@ DARK = {"bg": "#1F1F1E", "side": "#292927", "card": "#32322F", "text": "#F4F0E9"
 FONT_FILES = {"sans": ("Figtree", "Figtree.ttf"),
               "serif": ("EB Garamond", "EBGaramond.ttf"),
               "mono": ("JetBrains Mono", "JetBrainsMono.ttf")}
+SHORTCUT_LABELS = {"app": ("App", "App path"),
+                   "directory": ("Folder Directory", "Folder path"),
+                   "url": ("Website", "Website URL")}
 
 
 def system_dark():
@@ -188,6 +191,9 @@ class DesktopApp:
         self.page = "Setup" if self.first_run else "History"
         self.history = []
         self.dictionary = {"snippets": {}, "vocabulary": {}}
+        self.shortcuts = {}
+        self.shortcut_draft = None
+        self.shortcut_pending = False
         self.devices = []
         self.model = {}
         self.setup_error = ""
@@ -577,12 +583,14 @@ class DesktopApp:
         tk.Label(brand, text="Beta", bg="#EADBFC" if self.theme != "Dark" else c["button"],
                  fg=c["link"], font=self.font(8, "bold"), padx=5, pady=2).pack(side="left", padx=(6, 0))
         self.nav_buttons = {}
-        for page in ("History", "Dictionary", "Settings"):
+        for page in ("History", "Dictionary", "Shortcuts", "Settings"):
             row = tk.Frame(side, bg=c["button"] if self.page == page else c["side"],
                            cursor="hand2", height=36)
             row.pack(fill="x", padx=12, pady=2)
             row.pack_propagate(False)
-            icon = self.icon(row, page, c["text"] if self.page == page else c["muted"])
+            icon = (self.label(row, "↗", 16, color="text" if self.page == page else "muted")
+                    if page == "Shortcuts" else
+                    self.icon(row, page, c["text"] if self.page == page else c["muted"]))
             icon.pack(side="left", padx=(12, 10))
             label = self.label(row, page, 10, weight="bold" if self.page == page else "normal")
             label.pack(side="left")
@@ -658,7 +666,10 @@ class DesktopApp:
             color = self.colors["button"] if selected or page == hover else self.colors["side"]
             for widget in (row, icon, label):
                 widget.configure(bg=color)
-            icon.configure(image=self.icon_image(page, self.colors["text"] if selected else self.colors["muted"]))
+            if page == "Shortcuts":
+                icon.configure(fg=self.colors["text"] if selected else self.colors["muted"])
+            else:
+                icon.configure(image=self.icon_image(page, self.colors["text"] if selected else self.colors["muted"]))
             label.configure(font=self.font(10, "bold" if selected else "normal"))
 
     def nav_hover(self, page):
@@ -695,6 +706,8 @@ class DesktopApp:
             self.pill.request("history_list", self.receive_history, limit=100)
         elif self.page == "Dictionary":
             self.pill.request("dictionary_get", self.receive_dictionary)
+        elif self.page == "Shortcuts":
+            self.pill.request("shortcuts_get", self.receive_shortcuts)
         elif self.page == "Settings":
             self.pill.request("devices", self.receive_devices)
             self.pill.request("model_status", self.receive_model)
@@ -982,6 +995,120 @@ class DesktopApp:
         else:
             self.report("Dictionary saved.")
             self.refresh_page()
+
+    def receive_shortcuts(self, data, error):
+        if error:
+            self.report(error)
+            return
+        if data != self.shortcuts:
+            self.shortcuts = data
+            if self.page == "Shortcuts":
+                self.render_page()
+
+    def shortcut_add_menu(self, parent, title):
+        control = tk.Menubutton(parent, text=title, bg=self.colors["button"], fg=self.colors["text"],
+                                activebackground=self.colors["line"], activeforeground=self.colors["text"],
+                                relief="flat", bd=0, padx=14, pady=8, cursor="hand2", font=self.font(10))
+        menu = tk.Menu(control, tearoff=False, bg=self.colors["card"], fg=self.colors["text"],
+                       activebackground=self.colors["button"], activeforeground=self.colors["text"])
+        for kind, (label, _placeholder) in SHORTCUT_LABELS.items():
+            menu.add_command(label=label, command=lambda selected=kind: self.add_shortcut(selected))
+        control.configure(menu=menu)
+        return control
+
+    def show_shortcuts(self):
+        inside = self.scroll_area(self.body)
+        self.label(inside, "Say “open <action name>” to invoke a saved action.", 10,
+                   color="muted").pack(fill="x", pady=(0, 18))
+        if not self.shortcuts and not self.shortcut_draft:
+            empty = tk.Frame(inside, bg=self.colors["subtle"], padx=24, pady=24,
+                             highlightbackground=self.colors["line"], highlightthickness=1)
+            empty.pack(fill="x", pady=(10, 0))
+            self.label(empty, "No actions yet", 16, weight="bold").pack(anchor="w", pady=(0, 7))
+            self.label(empty, "Save an app, folder, or website with a nickname.", 10,
+                       color="muted").pack(anchor="w", pady=(0, 16))
+            self.shortcut_add_button = self.shortcut_add_menu(empty, "Add a new action")
+            self.shortcut_add_button.pack(anchor="w")
+            return
+        self.shortcut_add_button = self.shortcut_add_menu(inside, "+ Add shortcuts")
+        self.shortcut_add_button.pack(anchor="e", pady=(0, 14))
+        records = list(self.shortcuts.items())
+        if self.shortcut_draft:
+            records.append((None, {"type": self.shortcut_draft, "target": ""}))
+        for original, record in records:
+            kind = record["type"]
+            title, hint = SHORTCUT_LABELS[kind]
+            row = tk.Frame(inside, bg=self.colors["card"], padx=15, pady=12,
+                           highlightbackground=self.colors["line"], highlightthickness=1)
+            row.pack(fill="x", pady=(0, 9))
+            self.label(row, title, 9, color="muted", weight="bold").pack(anchor="w", pady=(0, 9))
+            fields = tk.Frame(row, bg=self.colors["card"])
+            fields.pack(fill="x")
+            name_entry = tk.Entry(fields, width=20, font=self.font(10), bg=self.colors["value"],
+                                  fg=self.colors["text"], insertbackground=self.colors["text"],
+                                  relief="flat", bd=0)
+            name_entry.pack(side="left", padx=(0, 8), ipady=7, ipadx=7)
+            target_entry = tk.Entry(fields, font=self.font(9, style="mono"), bg=self.colors["value"],
+                                    fg=self.colors["text"], insertbackground=self.colors["text"],
+                                    relief="flat", bd=0)
+            target_entry.pack(side="left", fill="x", expand=True, ipady=7, ipadx=7)
+            if original is None:
+                self.placeholder(name_entry, "Nickname")
+                self.placeholder(target_entry, hint)
+                self.shortcut_draft_entry = name_entry
+            else:
+                name_entry.insert(0, original)
+                target_entry.insert(0, record["target"])
+            self.focus_entry(name_entry, self.colors["value"])
+            self.focus_entry(target_entry, self.colors["value"])
+            actions = tk.Frame(row, bg=self.colors["card"])
+            actions.pack(anchor="e", pady=(9, 0))
+            self.button(actions, "Save", lambda old=original, k=kind, n=name_entry, t=target_entry:
+                        self.change_shortcut(old, k, n, t), primary=True).pack(side="right")
+            if original is None:
+                self.button(actions, "Cancel", self.cancel_shortcut).pack(side="right", padx=(0, 8))
+            else:
+                self.button(actions, "Delete", lambda old=original: self.change_shortcut(old)).pack(
+                    side="right", padx=(0, 8))
+
+    def add_shortcut(self, kind):
+        self.shortcut_draft = kind
+        self.render_page()
+        self.root.after_idle(self.shortcut_draft_entry.focus_force)
+
+    def cancel_shortcut(self):
+        self.shortcut_draft = None
+        self.render_page()
+
+    def change_shortcut(self, original, kind=None, name_entry=None, target_entry=None):
+        if self.shortcut_pending or not self.pill.ready:
+            return
+        entries = dict(self.shortcuts)
+        if original is not None:
+            entries.pop(original, None)
+        if kind is not None:
+            name = self.entry_text(name_entry).strip()
+            target = self.entry_text(target_entry).strip()
+            if not name or not target:
+                self.report("Enter a nickname and a path or URL.")
+                return
+            normalized = " ".join(name.casefold().split())
+            if normalized in {" ".join(saved.casefold().split()) for saved in entries}:
+                self.report("That nickname already exists.")
+                return
+            entries[name] = {"type": kind, "target": target}
+        self.shortcut_pending = True
+        self.pill.request("shortcuts_set", lambda _result, error: self.after_shortcut_change(error),
+                          entries=entries)
+
+    def after_shortcut_change(self, error):
+        self.shortcut_pending = False
+        if error:
+            self.report(error)
+            return
+        self.shortcut_draft = None
+        self.report("Shortcuts saved.")
+        self.refresh_page()
 
     def receive_devices(self, data, error):
         if not error:

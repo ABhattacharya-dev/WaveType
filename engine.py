@@ -27,7 +27,7 @@ import stt
 from vocabulary import apply_vocabulary
 from windows_support import ChildJob, Hotkey, foreground_app, foreground_window, insert_text
 from ipc_protocol import APP_DIR, ENDPOINT
-from user_data import (dictionary_get, dictionary_set, history_append,
+from user_data import (dictionary_get, dictionary_set, shortcuts_get, shortcuts_set, history_append,
                        history_change, history_compact, history_list)
 from vocabulary import VOCABULARY
 
@@ -229,6 +229,11 @@ class DictationEngine:
             self.models = ModelDownloads(self._model_event, tier=lambda: self.tier,
                                          release=self._release_model)
         self.hotkey = None
+        try:
+            self.shortcuts = shortcuts_get(stt.SHORTCUTS_FILE)
+        except (OSError, ValueError) as exc:
+            logging.warning("Could not load shortcuts: %s", exc)
+            self.shortcuts = {}
         self.hotkey_enabled = False
         self.assistant_enabled = False
         self.assistant_session = False
@@ -533,7 +538,14 @@ class DictationEngine:
             if name == "dictionary_get":
                 return dictionary_get(stt.TERMS_FILE, VOCABULARY)
             if name == "dictionary_set":
-                return dictionary_set(stt.TERMS_FILE, VOCABULARY, args.get("kind"), args.get("entries"))
+                return dictionary_set(stt.TERMS_FILE, VOCABULARY, args.get("kind"),
+                                      args.get("entries"), stt.SHORTCUTS_FILE)
+            if name == "shortcuts_get":
+                self.shortcuts = shortcuts_get(stt.SHORTCUTS_FILE)
+                return self.shortcuts
+            if name == "shortcuts_set":
+                self.shortcuts = shortcuts_set(stt.SHORTCUTS_FILE, stt.TERMS_FILE, args.get("entries"))
+                return {"count": len(self.shortcuts)}
             if name == "history_list":
                 return history_list(stt.HISTORY_DIR, args.get("limit", 100), args.get("offset", 0))
             if name == "history_change":

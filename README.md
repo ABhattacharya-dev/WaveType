@@ -6,7 +6,7 @@
 
 WaveType is a local dictation app for Windows 10 and 11. A floating pill and a **Ctrl+Win** shortcut turn speech into text with Parakeet Redux; optional Qwen Smart cleanup can polish the result before insertion. After the first model downloads, inference runs offline.
 
-The source tree is developing **0.1.0-beta1.03 (Assistant)**. Its first stage adds an opt-in **Ctrl+Shift+Win** voice mode with a lime waveform. It transcribes locally without inserting text or saving history; until shortcut actions are added, it displays **Not Found**. The current downloadable release remains beta 1.02.
+The source tree is developing **0.1.0-beta1.03 (Assistant)**. Its first stage adds an opt-in **Ctrl+Shift+Win** voice mode with a lime waveform. Stage 2 adds a **Shortcuts** page for saving app, folder, and website nicknames. Assistant speech stays local without inserting text or saving history; saved actions still display **Not Found** until their launch stages are implemented. The current downloadable release remains beta 1.02.
 
 [![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&logoColor=white)](#download-and-install) [![Latest release](https://img.shields.io/github/v/release/ABhattacharya-dev/WaveType?include_prereleases&label=release)](https://github.com/ABhattacharya-dev/WaveType/releases) [![GitHub issues](https://img.shields.io/github/issues/ABhattacharya-dev/WaveType)](https://github.com/ABhattacharya-dev/WaveType/issues) [![License: MIT](https://img.shields.io/badge/license-MIT-2E7D6B)](LICENSE)
 
@@ -59,7 +59,7 @@ The current preview is **0.1.0-beta1.02**. See the [short release notes](docs/re
 
 Deleting a model removes its downloaded weights, runtimes, cached archives, partial files and verification records. Qwen deletion includes both CPU and GPU runtimes and turns off Smart cleanup. Parakeet deletion makes dictation unavailable until you download it again. Pause, Cancel and intentional deletion are remembered across restarts. The other model and your history, settings and dictionary are preserved. Progress bars appear only while downloading, paused, verifying, deleting, or completing a pause/cancel request.
 
-History stores the final text, date/time, and foreground app name as readable local JSON. Installed-app models, settings, dictionaries, history, and logs live under `%LOCALAPPDATA%\STTCore`. Uninstall keeps them by default so reinstall restores your setup. Select **Also delete all local data** for a fresh start; this also removes partial downloads. Custom data locations are not removed. Read the full [privacy notes](docs/PRIVACY.md).
+History stores the final text, date/time, and foreground app name as readable local JSON. Installed-app models, settings, dictionaries, shortcuts, history, and logs live under `%LOCALAPPDATA%\STTCore`. Uninstall keeps them by default so reinstall restores your setup. Select **Also delete all local data** for a fresh start; this also removes partial downloads. Custom data locations are not removed. Read the full [privacy notes](docs/PRIVACY.md).
 
 
 ## How to dictate
@@ -113,7 +113,7 @@ Aliases correct known misrecognitions after transcription; they do not change Pa
 
 WaveType has no telemetry or speech-upload path in the reviewed application source. Parakeet runs locally; optional Qwen cleanup and the engine's authenticated IPC bind to `127.0.0.1`. Setup fetches missing models and runtimes over HTTPS and checks pinned SHA-256 hashes. An app receiving inserted text may independently sync it.
 
-History stores the final text, date/time, and foreground app name as readable local JSON. Installed-app models, settings, dictionaries, history, and logs live under `%LOCALAPPDATA%\STTCore` and are kept by default during uninstall. Select **Also delete all local data** to remove them for a fresh installation. Read the full [privacy notes](docs/PRIVACY.md).
+History stores the final text, date/time, and foreground app name as readable local JSON. Installed-app models, settings, dictionaries, shortcuts, history, and logs live under `%LOCALAPPDATA%\STTCore` and are kept by default during uninstall. Select **Also delete all local data** to remove them for a fresh installation. Read the full [privacy notes](docs/PRIVACY.md).
 
 ## Accessibility
 

@@ -107,6 +107,25 @@ class EngineTests(unittest.TestCase):
             self.assertEqual((record["text"], record["app"]), ("Hello there.", "Notepad.exe"))
             self.assertFalse((Path(directory) / "audio").exists())
 
+    def test_shortcuts_ipc_commands_refresh_engine_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            entries = {"Chrome": {"type": "app", "target": r"C:\Missing\Chrome.lnk"}}
+            with (patch.object(engine.stt, "SHORTCUTS_FILE", root / "shortcuts.json"),
+                  patch.object(engine.stt, "TERMS_FILE", root / "personal_terms.json"),
+                  patch.object(engine, "VOCABULARY", root / "vocab.json")):
+                self.assertEqual(self.core.command("shortcuts_set", {"entries": entries}), {"count": 1})
+                self.assertEqual(self.core.command("shortcuts_get", {}), entries)
+                self.assertEqual(self.core.shortcuts, entries)
+                restarted = engine.DictationEngine(asr=self.asr, capture=False)
+                try:
+                    self.assertEqual(restarted.shortcuts, entries)
+                finally:
+                    restarted.close()
+                with self.assertRaisesRegex(ValueError, "shortcut"):
+                    self.core.command("dictionary_set", {"kind": "snippets",
+                                                         "entries": {"chrome": "text"}})
+
     def test_history_date_labels(self):
         from desktop import history_heading, history_time
         today = date(2026, 10, 13)
@@ -328,6 +347,79 @@ class EngineTests(unittest.TestCase):
             app.show()
             root.update()
             self.assertEqual(app.main.state(), "normal")
+        finally:
+            root.destroy()
+
+    def test_shortcuts_page_empty_state_and_new_action(self):
+        if os.name != "nt":
+            self.skipTest("Windows only")
+        from desktop import DesktopApp, LIGHT
+        root = tk.Tk()
+        try:
+            app = DesktopApp.__new__(DesktopApp)
+            app.root = root
+            app.main = tk.Toplevel(root)
+            app.main.geometry("960x640")
+            app.colors = LIGHT
+            app.theme = "Light"
+            app.page = "Shortcuts"
+            app.model = {}
+            app.shortcuts = {}
+            app.shortcut_draft = None
+            app.shortcut_pending = False
+            app.pill = Mock(ready=True)
+            app.render()
+            root.update()
+            self.assertIn("Shortcuts", app.nav_buttons)
+            self.assertEqual(app.shortcut_add_button.cget("text"), "Add a new action")
+            menu = app.shortcut_add_button.nametowidget(str(app.shortcut_add_button.cget("menu")))
+            self.assertEqual([menu.entrycget(i, "label") for i in range(3)],
+                             ["App", "Folder Directory", "Website"])
+            for kind, hint in (("directory", "Folder path"), ("url", "Website URL")):
+                app.add_shortcut(kind)
+                root.update()
+                name = app.shortcut_draft_entry
+                target = next(widget for widget in name.master.winfo_children()
+                              if isinstance(widget, tk.Entry) and widget is not name)
+                self.assertEqual(target.placeholder, hint)
+                app.cancel_shortcut()
+            menu = app.shortcut_add_button.nametowidget(str(app.shortcut_add_button.cget("menu")))
+            menu.invoke(0)
+            root.update()
+            self.assertEqual(app.shortcut_draft, "app")
+            self.assertEqual(app.shortcut_draft_entry.cget("fg"), LIGHT["text"])
+            name = app.shortcut_draft_entry
+            target = next(widget for widget in name.master.winfo_children()
+                          if isinstance(widget, tk.Entry) and widget is not name)
+            self.assertEqual(app.entry_text(target), "")
+            name.insert(0, "Chrome")
+            target.focus_set()
+            root.update()
+            target.insert(0, r"C:\Missing\Chrome.lnk")
+            app.change_shortcut(None, "app", name, target)
+            self.assertEqual(app.pill.request.call_args.args[0], "shortcuts_set")
+            saved = app.pill.request.call_args.kwargs["entries"]
+            self.assertEqual(saved["Chrome"], {"type": "app", "target": r"C:\Missing\Chrome.lnk"})
+            app.pill.request.call_args.args[1]({"count": 1}, None)
+            app.receive_shortcuts(saved, None)
+            self.assertEqual(app.shortcut_add_button.cget("text"), "+ Add shortcuts")
+            def all_entries(widget):
+                for child in widget.winfo_children():
+                    if isinstance(child, tk.Entry):
+                        yield child
+                    yield from all_entries(child)
+            saved_name = next(entry for entry in all_entries(app.body) if entry.get() == "Chrome")
+            saved_target = next(entry for entry in saved_name.master.winfo_children()
+                                if isinstance(entry, tk.Entry) and entry is not saved_name)
+            saved_name.delete(0, tk.END)
+            saved_name.insert(0, "Browser")
+            app.change_shortcut("Chrome", "app", saved_name, saved_target)
+            renamed = app.pill.request.call_args.kwargs["entries"]
+            self.assertEqual(list(renamed), ["Browser"])
+            app.pill.request.call_args.args[1]({"count": 1}, None)
+            app.receive_shortcuts(renamed, None)
+            app.change_shortcut("Browser")
+            self.assertEqual(app.pill.request.call_args.kwargs["entries"], {})
         finally:
             root.destroy()
 

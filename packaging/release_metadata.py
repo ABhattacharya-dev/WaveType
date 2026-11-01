@@ -87,7 +87,8 @@ def manifest(bundle, version):
             continue
         relative = path.relative_to(bundle)
         if (path.suffix.lower() in (".gguf", ".wav", ".jsonl", ".part", ".pfx", ".pem") or
-                path.name in ("personal_terms.json", "personal_vocabulary.json", "ui.json", "endpoint.json") or
+                path.name in ("personal_terms.json", "personal_vocabulary.json", "shortcuts.json",
+                              "ui.json", "endpoint.json") or path.name.startswith(".shortcuts.json.") or
                 any(part in ("history", ".venv", "artifacts") for part in relative.parts)):
             raise ValueError(f"private or model file must not be bundled: {relative}")
         files.append({"path": relative.as_posix(), "bytes": path.stat().st_size, "sha256": sha256(path)})

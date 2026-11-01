@@ -12,6 +12,7 @@ RUNTIME = Path(os.environ.get("STT_RUNTIME_DIR") or
                ((Path(os.environ.get("LOCALAPPDATA", Path.home())) / "STTCore" / "runtime")
                 if getattr(sys, "frozen", False) else Path(__file__).resolve().parent / "runtime"))
 TERMS_FILE = RUNTIME.parent / "personal_terms.json"
+SHORTCUTS_FILE = RUNTIME.parent / "shortcuts.json"
 HISTORY_DIR = RUNTIME.parent / "history"
 SHORTCUT_START = re.compile(r"\binsert\s+my\s+", re.IGNORECASE)
 

@@ -3,6 +3,8 @@ __pycache__/
 .ruff_cache/
 *.gguf
 personal_terms.json
+shortcuts.json
+.shortcuts.json.*.tmp
 personal_vocabulary.json
 history/
 runtime/smart/

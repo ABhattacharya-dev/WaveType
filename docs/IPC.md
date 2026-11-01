@@ -23,7 +23,9 @@ Commands:
 | `model_stop` | `model`: `asr`/`cleanup`, `action`: `pause`/`cancel` | Stops an active job; pause retains partial files and cancel removes them. |
 | `model_delete` | `model`: `asr`/`cleanup` | Asynchronous; requires idle dictation. Stops conflicting work, unloads the model, then deletes its owned files. Returns `deleting`; follow `model_progress` for completion or failure. Qwen deletion emits `cleanup_disabled` so clients save and display `smart=false`. |
 | `dictionary_get` | none | Returns `snippets` and `vocabulary` objects. |
-| `dictionary_set` | `kind`: `snippets`/`vocabulary`, `entries`: complete object | Atomically replaces one personal dictionary after validation. |
+| `dictionary_set` | `kind`: `snippets`/`vocabulary`, `entries`: complete object | Atomically replaces one personal dictionary after validation. Snippet keys cannot match saved shortcut names. |
+| `shortcuts_get` | none | Returns saved action nicknames mapped to `{"type":"app"/"directory"/"url","target":"..."}`. |
+| `shortcuts_set` | `entries`: complete nickname-to-record object | Atomically replaces saved actions. Names are unique after case folding and whitespace normalization and cannot match snippet keys. App and folder targets are absolute Windows paths; app paths end in `.exe` or `.lnk`; website targets are HTTP or HTTPS URLs. Missing local paths may still be saved. |
 | `history_list` | optional `limit` (1–500), `offset` | Returns newest dated entries first. Old JSONL entries remain readable. |
 | `history_change` | `id`, `action`: `delete` | Deletes the selected history entry. IDs are returned by `history_list` and may change after deletion. |
 | `settings` | `mode`: `hold`/`tap`/`hybrid`; `tap_threshold_ms`: integer 100–1000; `smart`: boolean; `tier`: `auto`/`cpu`; `hotkey`: boolean; `assistant_enabled`: boolean; `microphone`: device index or null; `language`: `auto` | Accepted while idle, except `hotkey=false` can disable the hook during any state. Hybrid starts on Ctrl+Win press, sends on release at or above the threshold (default 250 ms), or locks after a shorter tap. `assistant_enabled=true` adds Ctrl+Shift+Win for Assistant capture. `smart=true` warms cleanup for dictation. This adapter auto-detects among Redux's supported languages. |
@@ -36,6 +38,8 @@ Commands:
 | `shutdown` | none | Stops the server and its child processes. |
 
 States are `idle`, `recording`, `locked`, and `processing`. State events include `assistant: true` during Assistant capture and processing. `status` and `settings` report `assistant_enabled`; `status` also reports the active `assistant` flag. A UI should subscribe before starting capture, display `level` values between 0 and 1, and show `error` events. The `result` event contains raw and final text; dictation adds a dated history entry. Assistant capture does not insert, use Smart cleanup, or save history. Either hotkey chord finishes a locked Assistant recording. Stage 1 emits `assistant_feedback` with `value: "Not Found"` after its result, pending shortcut actions; the pill clears that feedback on the next recording state event. If dictation insertion fails, the result still appears and an error event describes the failure.
+
+Stage 2 stores shortcuts in `%LOCALAPPDATA%\STTCore\shortcuts.json` for installed builds. The engine caches them and refreshes that cache when `shortcuts_get` or `shortcuts_set` runs. Speaking a saved action still returns `Not Found` until the launch categories are implemented.
 
 `model_progress` includes `model`, `state`, `file`, `downloaded`, `total`, and `error`. A zero `total` means the server did not provide a content length. Starting speech capture while Parakeet is unavailable returns a "Model unavailable" error; the app and model controls remain accessible.
 
