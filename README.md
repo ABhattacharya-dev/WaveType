@@ -71,7 +71,7 @@ History stores the final text and date/time as readable local JSON, with the for
 | Click the floating pill | Start locked recording; click again to send. Right-click to cancel. |
 | Right-click the tray icon → **WaveType** | Open History, Dictionary, Settings, and About. Choose **Exit** to stop the app and engine. |
 
-Smart cleanup can be enabled in the tray or Settings. Downloading its model in Settings does not enable it. Windows may block text insertion into elevated apps; if that happens, the final text remains in History. The clipboard is untouched by hotkey insertion.
+Smart cleanup can be enabled in the tray or Settings. Downloading its model in Settings does not enable it. Windows may block text insertion into elevated apps; if that happens, the final text remains in History. Most apps receive Unicode key input without using the clipboard. Notepad uses a short clipboard paste to avoid repeated or missing characters; WaveType restores supported clipboard formats afterward and keeps the temporary text out of Windows clipboard history and cloud sync. If a clipboard format cannot be preserved, insertion stops and the final text remains in History.
 
 ## Run from source
 

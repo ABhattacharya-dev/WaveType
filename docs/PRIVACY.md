@@ -24,6 +24,8 @@ Dictation works offline after the required files are installed.
 
 An application receiving inserted text may independently send or synchronize it.
 
+For Notepad insertion, WaveType temporarily places the final text on the Windows clipboard, uses the Windows format that excludes it from clipboard history and cloud synchronization, and restores the prior clipboard formats and bytes after paste. Clipboard data is held in memory only. If a format cannot be preserved, WaveType leaves the clipboard untouched and reports an insertion error; the final text stays in local History. Other apps continue to receive Unicode key input without using the clipboard.
+
 Microphone and Data Storage
 
 When an input device is available, the microphone remains open while the engine runs to maintain a short pre-roll in memory. The app can still open Settings if no microphone is available. Recorded clips and inference buffers stay in memory.

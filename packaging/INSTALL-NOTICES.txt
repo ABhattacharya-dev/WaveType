@@ -29,6 +29,10 @@ Deleting Qwen includes CPU/GPU runtimes and disables Smart cleanup. Deleting
 Parakeet stops dictation until downloaded again. Pause, cancel and deletion
 choices survive restart. The other model and personal data are preserved.
 An app you dictate into may itself send or sync the inserted text.
+Notepad receives a short clipboard paste because its editor can corrupt rapid
+key input. WaveType restores supported clipboard contents and excludes the
+temporary text from Windows clipboard history and cloud sync. If the current
+clipboard format cannot be preserved, insertion stops; the text stays in History.
 
 Startup is optional. The global keyboard hook handles the dictation shortcut;
 WaveType does not store ordinary keystrokes. Choose Exit from the tray to stop
