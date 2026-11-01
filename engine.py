@@ -747,18 +747,22 @@ class DictationEngine:
         record = actions.get(requested)
         if record is None:
             record = actions.get(requested.rstrip(".,!?…:;").rstrip())
-        if record is None or record["type"] not in ("app", "directory"):
+        if record is None or record["type"] not in ("app", "directory", "url"):
             return "Not Found"
-        target = Path(record["target"])
-        if not (target.is_file() if record["type"] == "app" else target.is_dir()):
-            return "Not Found"
+        kind = record["type"]
+        if kind != "url":
+            target = Path(record["target"])
+            if not (target.is_file() if kind == "app" else target.is_dir()):
+                return "Not Found"
         try:
-            if record["type"] == "directory":
+            if kind == "url":
+                os.startfile(record["target"])
+            elif kind == "directory":
                 os.startfile(target, "explore")
             else:
                 os.startfile(target)
         except FileNotFoundError:
-            return "Not Found"
+            return "Open failed" if kind == "url" else "Not Found"
         except OSError:
             return "Open failed"
         return None

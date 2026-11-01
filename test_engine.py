@@ -610,7 +610,7 @@ class EngineTests(unittest.TestCase):
                 self.assertIsNone(self.core._assistant_action("OPEN google chrome!"))
                 launch.assert_called_once_with(target)
                 for spoken in ("open google chrome please", "please open google chrome",
-                               "open youtube", "open unknown", "open"):
+                               "open unknown", "open"):
                     with self.subTest(spoken=spoken):
                         self.assertEqual(self.core._assistant_action(spoken), "Not Found")
                 launch.assert_called_once()
@@ -689,6 +689,47 @@ class EngineTests(unittest.TestCase):
                 self.core._process([result], time.perf_counter())
                 launch.assert_called_once()
             self.assertIn({"event": "assistant_feedback", "value": "Not Found"}, events)
+
+    def test_assistant_opens_only_complete_saved_website_commands(self):
+        url = "https://www.youtube.com/"
+        self.core.shortcuts = {"You  Tube": {"type": "url", "target": url}}
+        with patch.object(engine.os, "startfile", create=True) as launch:
+            self.assertIsNone(self.core._assistant_action("OPEN you tube!"))
+            launch.assert_called_once_with(url)
+            for spoken in ("open you tube please", "please open you tube", "open unknown"):
+                with self.subTest(spoken=spoken):
+                    self.assertEqual(self.core._assistant_action(spoken), "Not Found")
+            launch.assert_called_once()
+            launch.side_effect = OSError("no browser association")
+            self.assertEqual(self.core._assistant_action("open you tube."), "Open failed")
+            launch.side_effect = FileNotFoundError()
+            self.assertEqual(self.core._assistant_action("open you tube"), "Open failed")
+
+    def test_assistant_website_launch_result_and_failure_feedback(self):
+        url = "https://www.youtube.com/"
+        self.core.shortcuts = {"YouTube": {"type": "url", "target": url}}
+        self.core.assistant_session = True
+        self.core.record_history = True
+        self.core.recording_ms = 100
+        self.core.foreground = {"process": "Notepad.exe"}
+        result = Future()
+        result.set_result(("Open YouTube.", 1.0))
+        events = []
+        self.core.listeners.add(events.append)
+        with (tempfile.TemporaryDirectory() as temporary,
+              patch.object(engine.stt, "HISTORY_DIR", Path(temporary)),
+              patch.object(engine.os, "startfile", create=True) as launch):
+            self.core._process([result], time.perf_counter())
+            launch.assert_called_once_with(url)
+            self.assertFalse(any(event["event"] == "assistant_feedback" for event in events))
+            saved = json.loads(next(Path(temporary).glob("*.jsonl")).read_text().splitlines()[0])
+            self.assertEqual((saved["text"], saved["app"]), ("Open YouTube.", "Assistant"))
+            events.clear()
+            self.core.assistant_session = True
+            self.core.record_history = False
+            launch.side_effect = OSError("no browser association")
+            self.core._process([result], time.perf_counter())
+        self.assertIn({"event": "assistant_feedback", "value": "Open failed"}, events)
 
     def test_assistant_reports_app_launch_rejection_in_pill(self):
         with tempfile.TemporaryDirectory() as temporary:

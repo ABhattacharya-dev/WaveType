@@ -41,7 +41,9 @@ class UserDataTests(unittest.TestCase):
                            {"type": "directory", "target": "relative"},
                            {"type": "directory", "target": "C:\\Bad\nPath"},
                            {"type": "url", "target": "file:///C:/secret"},
-                           {"type": "url", "target": "https://"}):
+                           {"type": "url", "target": "https://"},
+                           {"type": "url", "target": "https://example.com:bad"},
+                           {"type": "url", "target": "https://bad host"}):
                 with self.subTest(record=record), self.assertRaises(ValueError):
                     shortcuts_set(path, terms, {"name": record})
             with self.assertRaisesRegex(ValueError, "shortcut names"):
