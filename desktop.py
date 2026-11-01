@@ -688,6 +688,8 @@ class DesktopApp:
         getattr(self, f"show_{self.page.lower()}")()
         previous.destroy()
         self.body.pack(fill="both", expand=True, padx=36, pady=(0, 12))
+        if hasattr(self, "notice") and self.notice.winfo_exists() and self.notice.winfo_manager():
+            self.notice.lift()
 
     def navigate(self, page):
         if page == self.page:

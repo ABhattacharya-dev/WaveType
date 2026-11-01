@@ -253,6 +253,8 @@ class EngineTests(unittest.TestCase):
             root.update()
             app.render_page()
             root.update()
+            self.assertEqual(app.notice.cget("text"), "Dictionary saved.")
+            self.assertIs(app.content.winfo_children()[-1], app.notice)
             app.report("That key already exists.")
             root.update()
             self.assertEqual(app.notice.cget("text"), "That key already exists.")
