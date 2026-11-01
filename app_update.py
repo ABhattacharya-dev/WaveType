@@ -15,12 +15,12 @@ RELEASE_API = "https://api.github.com/repos/ABhattacharya-dev/WaveType/releases?
 CHECK_INTERVAL = 24 * 60 * 60
 MANUAL_COOLDOWN = 60
 MAX_CHECKSUM_BYTES = 64 * 1024
-VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)-beta1\.(\d+)$")
+VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)-beta1\.(\d+)(?:\.(\d+))?$")
 
 
 def version_key(value):
     match = VERSION.fullmatch(value)
-    return tuple(map(int, match.groups())) if match else None
+    return tuple(int(part or 0) for part in match.groups()) if match else None
 
 
 def select_release(releases, current):

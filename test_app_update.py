@@ -30,11 +30,15 @@ class UpdateTests(unittest.TestCase):
             return {"name": name, "size": 10, "browser_download_url": "https://github.com/ABhattacharya-dev/WaveType/releases/download/test/" + name}
 
         releases = [release("v0.1.0-beta1.03", [asset("WaveType-0.1.0-beta1.03-Setup-x64.exe"), asset("SHA256SUMS.txt")]),
+                    release("v0.1.0-beta1.03.1", [asset("WaveType-0.1.0-beta1.03.1-Setup-x64.exe"), asset("SHA256SUMS.txt")]),
                     release("v0.1.0-beta1.04", [asset("WaveType-0.1.0-beta1.04-Setup-x64.exe")]),
                     release("v0.1.0-beta2.01", [asset("WaveType-0.1.0-beta2.01-Setup-x64.exe"), asset("SHA256SUMS.txt")])]
-        self.assertEqual(select_release(releases, "0.1.0-beta1.02")["version"], "0.1.0-beta1.03")
-        self.assertIsNone(select_release(releases, "0.1.0-beta1.03"))
-        self.assertEqual(version_key("v0.1.0-beta1.12"), (0, 1, 0, 12))
+        self.assertEqual(select_release(releases, "0.1.0-beta1.02")["version"], "0.1.0-beta1.03.1")
+        self.assertEqual(select_release(releases, "0.1.0-beta1.03")["version"], "0.1.0-beta1.03.1")
+        self.assertIsNone(select_release(releases, "0.1.0-beta1.03.1"))
+        self.assertEqual(version_key("v0.1.0-beta1.12"), (0, 1, 0, 12, 0))
+        self.assertEqual(version_key("v0.1.0-beta1.03.1"), (0, 1, 0, 3, 1))
+        self.assertLess(version_key("0.1.0-beta1.03.1"), version_key("0.1.0-beta1.04"))
 
     def test_checksum_must_name_the_exact_installer(self):
         digest = "a" * 64
