@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import socketserver
 import subprocess
@@ -27,7 +28,7 @@ import stt
 from vocabulary import apply_vocabulary
 from windows_support import ChildJob, Hotkey, foreground_app, foreground_window, insert_text
 from ipc_protocol import APP_DIR, ENDPOINT
-from user_data import (dictionary_get, dictionary_set, history_append,
+from user_data import (dictionary_get, dictionary_set, shortcuts_get, shortcuts_set, history_append,
                        history_change, history_compact, history_list)
 from vocabulary import VOCABULARY
 
@@ -229,7 +230,14 @@ class DictationEngine:
             self.models = ModelDownloads(self._model_event, tier=lambda: self.tier,
                                          release=self._release_model)
         self.hotkey = None
+        try:
+            self.shortcuts = shortcuts_get(stt.SHORTCUTS_FILE)
+        except (OSError, ValueError) as exc:
+            logging.warning("Could not load shortcuts: %s", exc)
+            self.shortcuts = {}
         self.hotkey_enabled = False
+        self.assistant_enabled = False
+        self.assistant_session = False
         self.hotkey_events = queue.Queue()
         self.hotkey_pending_finish = False
         self.hotkey_recording = False
@@ -360,7 +368,8 @@ class DictationEngine:
 
     def _state(self, value):
         self.state = value
-        self.emit("state", {"value": value, "mode": self.mode})
+        self.emit("state", {"value": value, "mode": self.mode,
+                            "assistant": self.assistant_session})
         self.level_wakeup.set()
 
     def _hotkey(self, action, held_ms):
@@ -376,14 +385,30 @@ class DictationEngine:
                 if self.stopping.is_set():
                     continue
                 action, held_ms = event
+                assistant = action.startswith("assistant_")
+                if assistant:
+                    action = action.removeprefix("assistant_")
+                if action == "switch":
+                    if self.state == "locked" and self.assistant_session:
+                        self.hotkey_pending_finish = True
+                        continue
+                    self.hotkey_pending_finish = False
+                    if self.state in ("recording", "locked") and not self.assistant_session:
+                        self.command("cancel", {})
+                    if self.state == "idle":
+                        self.hotkey_recording = True
+                        self.command("press", {"assistant": True})
+                    continue
                 if action == "abort":
                     self.hotkey_pending_finish = False
                     if self.hotkey_recording and self.state == "recording":
                         self.command("cancel", {})
                     continue
                 if action == "press" and self.state == "locked" and self.mode == "hybrid":
-                    self.hotkey_pending_finish = True
-                    continue
+                    if self.assistant_session or not assistant:
+                        self.hotkey_pending_finish = True
+                        continue
+                    self.command("cancel", {})
                 if action == "release" and self.hotkey_pending_finish:
                     self.hotkey_pending_finish = False
                     self.command("press", {"insert": True})
@@ -393,7 +418,8 @@ class DictationEngine:
                     continue
                 if action == "press" and self.state == "idle":
                     self.hotkey_recording = True
-                self.command(action, {"insert": True, "held_ms": held_ms})
+                self.command(action, {"insert": not assistant, "assistant": assistant,
+                                      "held_ms": held_ms})
                 if action == "release" and self.state == "processing":
                     self.hotkey_recording = False
             except Exception as exc:
@@ -406,6 +432,7 @@ class DictationEngine:
         if self.hotkey is None:
             self.hotkey = Hotkey(self._hotkey)
             self.hotkey.start()
+        self.hotkey.assistant_enabled = self.assistant_enabled
         self.hotkey_enabled = True
 
     def _ensure_cleaner(self):
@@ -453,6 +480,8 @@ class DictationEngine:
             if name == "status":
                 return {"state": self.state, "mode": self.mode, "level": self.level,
                         "tap_threshold_ms": self.tap_threshold_ms, "hotkey": self.hotkey_enabled,
+                        "assistant_enabled": self.assistant_enabled,
+                        "assistant": self.assistant_session,
                         "smart_ready": self.cleaner is not None, "sample_rate": self.rate,
                         "asr_backend": (type(self.asr_future.result()).__name__ if self.asr_future and
                                         self.asr_future.done() else "Parakeet (unloaded)" if self.asr_library else
@@ -510,7 +539,14 @@ class DictationEngine:
             if name == "dictionary_get":
                 return dictionary_get(stt.TERMS_FILE, VOCABULARY)
             if name == "dictionary_set":
-                return dictionary_set(stt.TERMS_FILE, VOCABULARY, args.get("kind"), args.get("entries"))
+                return dictionary_set(stt.TERMS_FILE, VOCABULARY, args.get("kind"),
+                                      args.get("entries"), stt.SHORTCUTS_FILE)
+            if name == "shortcuts_get":
+                self.shortcuts = shortcuts_get(stt.SHORTCUTS_FILE)
+                return self.shortcuts
+            if name == "shortcuts_set":
+                self.shortcuts = shortcuts_set(stt.SHORTCUTS_FILE, stt.TERMS_FILE, args.get("entries"))
+                return {"count": len(self.shortcuts)}
             if name == "history_list":
                 return history_list(stt.HISTORY_DIR, args.get("limit", 100), args.get("offset", 0))
             if name == "history_change":
@@ -577,6 +613,12 @@ class DictationEngine:
                     self.hotkey_enabled = bool(args["hotkey"])
                     if self.hotkey_enabled:
                         self._enable_hotkey()
+                if "assistant_enabled" in args:
+                    if not isinstance(args["assistant_enabled"], bool):
+                        raise ValueError("assistant_enabled must be a boolean")
+                    self.assistant_enabled = args["assistant_enabled"]
+                    if self.hotkey:
+                        self.hotkey.assistant_enabled = self.assistant_enabled
                 if self.smart_enabled:
                     try:
                         self._ensure_cleaner()
@@ -586,11 +628,19 @@ class DictationEngine:
                 return {"mode": self.mode, "tap_threshold_ms": self.tap_threshold_ms,
                         "smart": self.smart_enabled, "tier": self.tier,
                         "hotkey": self.hotkey_enabled, "microphone": self.microphone,
+                        "assistant_enabled": self.assistant_enabled,
                         "language": self.language}
             click = name == "toggle"
             if name in ("start", "press", "toggle"):
-                if self.models and any(v["state"] in ("deleting", "pausing", "canceling") or
-                                       (key == "cleanup" and self.smart_enabled and v["state"] in ("downloading", "verifying"))
+                assistant_requested = args.get("assistant", False)
+                if not isinstance(assistant_requested, bool):
+                    raise ValueError("assistant must be a boolean")
+                if assistant_requested and not self.assistant_enabled:
+                    raise ValueError("Enable Assistant in Settings first.")
+                if self.models and any((key == "asr" or not assistant_requested) and
+                                       (v["state"] in ("deleting", "pausing", "canceling") or
+                                        key == "cleanup" and self.smart_enabled and
+                                        v["state"] in ("downloading", "verifying"))
                                        for key, v in self.models.snapshot().items()):
                     raise ValueError("Wait for the model operation to finish.")
                 if self.state == "locked" and (self.mode in ("tap", "hybrid") or click):
@@ -601,7 +651,7 @@ class DictationEngine:
                     raise ValueError("engine is busy")
                 if self.models and self.models.snapshot()["asr"]["state"] != "ready":
                     raise ValueError("Model unavailable. Open Settings to download Parakeet Redux.")
-                if self.smart_enabled and self.models and self.models.snapshot()["cleanup"]["state"] != "ready":
+                if not assistant_requested and self.smart_enabled and self.models and self.models.snapshot()["cleanup"]["state"] != "ready":
                     raise ValueError("Qwen model unavailable. Download or repair it in Settings first.")
                 if self.stream is None:
                     try:
@@ -620,9 +670,12 @@ class DictationEngine:
                 self.foreground = foreground_app()
                 self.target_window = foreground_window()
                 self.insert = bool(args.get("insert", False))
+                self.assistant_session = assistant_requested
+                if self.assistant_session:
+                    self.insert = False
                 self.record_history = True
                 self._state("locked" if self.mode == "tap" or click else "recording")
-                if self.smart_enabled and self.cleaner is None:
+                if self.smart_enabled and not self.assistant_session and self.cleaner is None:
                     self.cleaner_future = self.executor.submit(self._ensure_cleaner)
                 return {"state": self.state}
             if name == "release":
@@ -639,6 +692,7 @@ class DictationEngine:
                     raise ValueError("nothing to cancel")
                 self.segment.clear()
                 self.replaying = False
+                self.assistant_session = False
                 self._state("idle")
                 return {"state": self.state}
             if name == "replay":
@@ -684,6 +738,35 @@ class DictationEngine:
         self.processing_thread.start()
         return {"state": "processing"}
 
+    def _assistant_action(self, text):
+        command = re.fullmatch(r"open\s+(.+)", text.strip(), flags=re.IGNORECASE)
+        if not command:
+            return "Not Found"
+        requested = " ".join(command.group(1).casefold().split())
+        actions = {" ".join(name.casefold().split()): record for name, record in self.shortcuts.items()}
+        record = actions.get(requested)
+        if record is None:
+            record = actions.get(requested.rstrip(".,!?…:;").rstrip())
+        if record is None or record["type"] not in ("app", "directory", "url"):
+            return "Not Found"
+        kind = record["type"]
+        if kind != "url":
+            target = Path(record["target"])
+            if not (target.is_file() if kind == "app" else target.is_dir()):
+                return "Not Found"
+        try:
+            if kind == "url":
+                os.startfile(record["target"])
+            elif kind == "directory":
+                os.startfile(target, "explore")
+            else:
+                os.startfile(target)
+        except FileNotFoundError:
+            return "Open failed" if kind == "url" else "Not Found"
+        except OSError:
+            return "Open failed"
+        return None
+
     def _process(self, futures, release_at):
         timings = {}
         error = lambda message: self.emit("error", {"message": message})
@@ -695,10 +778,10 @@ class DictationEngine:
             timings["asr_compute_ms"] = round(sum(milliseconds for _, milliseconds in parts), 1)
             timings["recording_ms"] = self.recording_ms
             start = time.perf_counter()
-            plain = stt.format_transcript(raw, on_error=error)
+            plain = raw if self.assistant_session else stt.format_transcript(raw, on_error=error)
             timings["shortcuts_ms"] = round((time.perf_counter() - start) * 1000, 1)
             final = plain
-            if self.smart_enabled and cleanup_needed(raw):
+            if not self.assistant_session and self.smart_enabled and cleanup_needed(raw):
                 start = time.perf_counter()
                 try:
                     if self.cleaner_future:
@@ -725,10 +808,15 @@ class DictationEngine:
                 timings["insert_ms"] = round((time.perf_counter() - start) * 1000, 1)
             timings["release_to_ready_ms"] = round((time.perf_counter() - release_at) * 1000, 1)
             self.emit("result", {"raw": raw, "text": final, "timings": timings})
+            if self.assistant_session:
+                feedback = self._assistant_action(raw)
+                if feedback:
+                    self.emit("assistant_feedback", {"value": feedback})
             if self.record_history:
                 try:
                     record = history_append(stt.HISTORY_DIR,
-                                            {"text": final, "app": (self.foreground or {}).get("process", "")})
+                                            {"text": final, "app": ("Assistant" if self.assistant_session else
+                                                                     (self.foreground or {}).get("process", ""))})
                     if record:
                         self.emit("history_added", {"id": record["id"]})
                 except OSError as exc:
@@ -742,6 +830,7 @@ class DictationEngine:
                 self.pending.clear()
                 self.replaying = False
                 self.asr_used = time.monotonic()
+                self.assistant_session = False
                 self._state("idle")
 
     def close(self):

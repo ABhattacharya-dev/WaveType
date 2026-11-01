@@ -34,11 +34,11 @@ Date and time
 
 Final text
 
-Foreground process name
+Foreground process name for dictation, or Assistant for Assistant commands
 
-Personal dictionary files and history are stored as local JSON and are not encrypted.
+Personal dictionary files, history, and saved shortcut nicknames and targets are stored as local JSON and are not encrypted. Installed builds keep shortcuts in `%LOCALAPPDATA%\STTCore\shortcuts.json`; source runs use an ignored `shortcuts.json` beside the source code. Shortcuts are kept on uninstall unless **Also delete all local data** is selected.
 
-The keyboard hook handles the Ctrl+Win chord. Ordinary keystrokes are not written to a key log.
+The keyboard hook handles Ctrl+Win and, when Assistant is enabled in Settings, Ctrl+Shift+Win. Ordinary keystrokes are not written to a key log. Assistant speech is transcribed locally without Smart cleanup or text insertion. Its final text is saved in local History with **Assistant** as the source, never the foreground app name; empty transcripts are not saved. A complete `open <nickname>` command launches a saved local app, opens a saved local folder in Explorer, or passes a saved HTTP or HTTPS URL to the Windows default browser. The browser may contact that website according to its own settings; WaveType does not fetch the page or check whether it loaded.
 
 Local Data and Uninstallation
 
@@ -54,11 +54,11 @@ Settings offers separate deletion for Parakeet and Qwen, including each model's 
 
 Exit WaveType from the tray before install, upgrade or uninstall. Setup checks file access and asks you to retry if files remain in use. Exiting stops active recording without inserting unfinished speech, releases the microphone and stops model workers and owned cleanup processes.
 
-Source runs keep personal dictionaries, models, and history in ignored repository folders instead.
+Source runs keep personal dictionaries, shortcuts, models, and history in ignored repository folders instead.
 
 Release Security and Validation
 
-The release build rejects bundled models, WAV recordings, JSONL history, personal dictionaries, endpoint tokens, and signing-key files. It produces a file manifest containing SHA-256 hashes.
+The release build rejects bundled models, WAV recordings, JSONL history, personal dictionaries, saved shortcuts, endpoint tokens, and signing-key files. It produces a file manifest containing SHA-256 hashes.
 
 This verifies package contents. It is not a complete audit of upstream native binaries or proof based on network capture.
 

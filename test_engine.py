@@ -1,5 +1,6 @@
 import hashlib
 import ctypes
+import gc
 import os
 import json
 import queue
@@ -33,17 +34,20 @@ class EngineTests(unittest.TestCase):
         self.models.start()
         self.capture.start()
         self.core = engine.DictationEngine(asr=self.asr, capture=False)
+        self.core.shortcuts = {}
 
     def tearDown(self):
         self.core.close()
         self.capture.stop()
         self.models.stop()
         self.job.stop()
+        gc.collect()
 
     def test_levels_sleep_when_idle_and_wake_for_recording(self):
         core = engine.DictationEngine.__new__(engine.DictationEngine)
         core.state = "idle"
         core.mode = "hold"
+        core.assistant_session = False
         core.level = 0.5
         core.stopping = threading.Event()
         core.level_wakeup = threading.Event()
@@ -106,6 +110,25 @@ class EngineTests(unittest.TestCase):
             self.assertEqual((record["text"], record["app"]), ("Hello there.", "Notepad.exe"))
             self.assertFalse((Path(directory) / "audio").exists())
 
+    def test_shortcuts_ipc_commands_refresh_engine_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            entries = {"Chrome": {"type": "app", "target": r"C:\Missing\Chrome.lnk"}}
+            with (patch.object(engine.stt, "SHORTCUTS_FILE", root / "shortcuts.json"),
+                  patch.object(engine.stt, "TERMS_FILE", root / "personal_terms.json"),
+                  patch.object(engine, "VOCABULARY", root / "vocab.json")):
+                self.assertEqual(self.core.command("shortcuts_set", {"entries": entries}), {"count": 1})
+                self.assertEqual(self.core.command("shortcuts_get", {}), entries)
+                self.assertEqual(self.core.shortcuts, entries)
+                restarted = engine.DictationEngine(asr=self.asr, capture=False)
+                try:
+                    self.assertEqual(restarted.shortcuts, entries)
+                finally:
+                    restarted.close()
+                with self.assertRaisesRegex(ValueError, "shortcut"):
+                    self.core.command("dictionary_set", {"kind": "snippets",
+                                                         "entries": {"chrome": "text"}})
+
     def test_history_date_labels(self):
         from desktop import history_heading, history_time
         today = date(2026, 10, 13)
@@ -127,7 +150,9 @@ class EngineTests(unittest.TestCase):
             app.body.pack(fill="both", expand=True)
             app.history = [{"id": "x", "date": date.today().isoformat(),
                             "time": "13:10:00", "text": "Text", "app": "ChatGPT.exe",
-                            "raw": "Do not display this"}]
+                            "raw": "Do not display this"},
+                           {"id": "y", "date": date.today().isoformat(),
+                            "time": "13:11:00", "text": "Open project.", "app": "Assistant"}]
             app.show_history()
             root.update()
             canvas = next(widget for widget in app.body.winfo_children() if isinstance(widget, tk.Canvas))
@@ -139,6 +164,10 @@ class EngineTests(unittest.TestCase):
             actions, source = [widget for widget in row.winfo_children() if isinstance(widget, tk.Frame)]
             self.assertEqual(labels + [source.winfo_children()[0].cget("text")],
                              ["1:10", "Text", "ChatGPT.exe"])
+            assistant_row = inside.winfo_children()[1].winfo_children()[2]
+            assistant_source = [widget for widget in assistant_row.winfo_children()
+                                if isinstance(widget, tk.Frame)][1]
+            self.assertEqual(assistant_source.winfo_children()[0].cget("text"), "Assistant")
             delete = next(widget for widget in actions.winfo_children()
                           if isinstance(widget, tk.Label) and widget.cget("image"))
             self.assertEqual(delete.winfo_manager(), "")
@@ -190,6 +219,18 @@ class EngineTests(unittest.TestCase):
 
             root.update()
             snippets = app.dictionary_panels["snippets"]
+            form = snippets.winfo_children()[1]
+            form_save = next(widget for widget in form.winfo_children()
+                             if isinstance(widget, tk.Button) and widget.cget("text") == "Save")
+            self.assertEqual(form_save.winfo_manager(), "")
+            form_key = app.dictionary_forms["snippets"][0]
+            form_key.focus_set()
+            form_key.insert(0, "new")
+            root.update()
+            self.assertEqual(form_save.winfo_manager(), "pack")
+            form_key.delete(0, tk.END)
+            root.update()
+            self.assertEqual(form_save.winfo_manager(), "")
             list_card = snippets.winfo_children()[2]
             row = list_card.winfo_children()[0]
             save, remove, key, _arrow, value = row.winfo_children()
@@ -228,6 +269,17 @@ class EngineTests(unittest.TestCase):
             save.invoke()
             self.assertEqual(app.pill.request.call_args.kwargs["entries"],
                              {"Parakeet": ["parakeet redux", "parakeet redox"]})
+
+            app.report("Dictionary saved.")
+            root.update()
+            app.render_page()
+            root.update()
+            self.assertEqual(app.notice.cget("text"), "Dictionary saved.")
+            self.assertIs(app.content.winfo_children()[-1], app.notice)
+            app.report("That key already exists.")
+            root.update()
+            self.assertEqual(app.notice.cget("text"), "That key already exists.")
+            self.assertIs(app.content.winfo_children()[-1], app.notice)
 
             app.navigate("History")
             self.assertIs(app.shell, shell)
@@ -284,11 +336,14 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(app.theme_var.get(), "Dark")
             self.assertEqual(app.settings_apply.winfo_manager(), "pack")
             app.tray_smart_var = tk.BooleanVar(master=root, value=False)
+            app.assistant_var.set(True)
             app.apply_settings()
+            self.assertTrue(app.pill.request.call_args.kwargs["assistant_enabled"])
             with patch("desktop.set_login"), patch.object(app, "save_preferences") as save_preferences:
                 app.pill.request.call_args.args[1]({}, None)
                 save_preferences.assert_called_once()
             self.assertEqual(app.preferences["theme"], "Dark")
+            self.assertTrue(app.preferences["assistant_enabled"])
             self.assertEqual(app.settings_apply.winfo_manager(), "")
             self.assertEqual(app.main.winfo_children()[0].cget("bg"), DARK["bg"])
             self.assertEqual(app.model_icon("download").get(8, 2), (244, 240, 233))
@@ -327,6 +382,122 @@ class EngineTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_shortcuts_page_empty_state_and_new_action(self):
+        if os.name != "nt":
+            self.skipTest("Windows only")
+        from desktop import DesktopApp, LIGHT
+        root = tk.Tk()
+        try:
+            app = DesktopApp.__new__(DesktopApp)
+            app.root = root
+            app.main = tk.Toplevel(root)
+            app.main.geometry("960x640")
+            app.colors = LIGHT
+            app.theme = "Light"
+            app.page = "Shortcuts"
+            app.model = {}
+            app.shortcuts = {}
+            app.shortcut_draft = None
+            app.shortcut_pending = False
+            app.pill = Mock(ready=True)
+            app.render()
+            root.update()
+            self.assertIn("Shortcuts", app.nav_buttons)
+            self.assertEqual(app.shortcut_add_button.cget("text"), "Add a new action")
+            menu = app.shortcut_add_button.nametowidget(str(app.shortcut_add_button.cget("menu")))
+            self.assertEqual([menu.entrycget(i, "label") for i in range(3)],
+                             ["App", "Folder Directory", "Website"])
+            for kind, hint in (("directory", "Folder path"), ("url", "Website URL")):
+                app.add_shortcut(kind)
+                root.update()
+                name = app.shortcut_draft_entry
+                target = next(widget for widget in name.master.winfo_children()
+                              if isinstance(widget, tk.Entry) and widget is not name)
+                self.assertEqual(target.placeholder, hint)
+                app.cancel_shortcut()
+            menu = app.shortcut_add_button.nametowidget(str(app.shortcut_add_button.cget("menu")))
+            menu.invoke(0)
+            root.update()
+            self.assertEqual(app.shortcut_draft, "app")
+            self.assertEqual(app.shortcut_draft_entry.cget("fg"), LIGHT["text"])
+            name = app.shortcut_draft_entry
+            target = next(widget for widget in name.master.winfo_children()
+                          if isinstance(widget, tk.Entry) and widget is not name)
+            save_button = next(widget for widget in name.master.master.winfo_children()[-1].winfo_children()
+                               if isinstance(widget, tk.Button) and widget.cget("text") == "Save")
+            self.assertEqual(save_button.winfo_manager(), "")
+            self.assertEqual(app.entry_text(target), "")
+            name.insert(0, "Chrome")
+            target.focus_set()
+            root.update()
+            self.assertEqual(save_button.winfo_manager(), "pack")
+            self.assertGreater(save_button.winfo_x(), next(widget for widget in save_button.master.winfo_children()
+                                                            if widget is not save_button).winfo_x())
+            target.insert(0, "<C:/Missing/Chrome.lnk>")
+            app.change_shortcut(None, "app", name, target)
+            self.assertEqual(app.pill.request.call_args.args[0], "shortcuts_set")
+            saved = app.pill.request.call_args.kwargs["entries"]
+            self.assertEqual(saved["Chrome"], {"type": "app", "target": r"C:\Missing\Chrome.lnk"})
+            app.pill.request.call_args.args[1]({"count": 1}, None)
+            app.receive_shortcuts(saved, None)
+            self.assertEqual(app.shortcut_add_button.cget("text"), "+ Add shortcuts")
+            def all_entries(widget):
+                for child in widget.winfo_children():
+                    if isinstance(child, tk.Entry):
+                        yield child
+                    yield from all_entries(child)
+            saved_name = next(entry for entry in all_entries(app.body) if entry.get() == "Chrome")
+            saved_target = next(entry for entry in saved_name.master.winfo_children()
+                                if isinstance(entry, tk.Entry) and entry is not saved_name)
+            saved_save = next(widget for widget in saved_name.master.master.winfo_children()[-1].winfo_children()
+                              if isinstance(widget, tk.Button) and widget.cget("text") == "Save")
+            self.assertEqual(saved_save.winfo_manager(), "")
+            app.pill.request.reset_mock()
+            saved_target.delete(0, tk.END)
+            saved_target.insert(0, r"C:\bad<name>.lnk")
+            root.update()
+            self.assertEqual(saved_save.winfo_manager(), "pack")
+            app.change_shortcut("Chrome", "app", saved_name, saved_target)
+            app.pill.request.assert_not_called()
+            self.assertIn("Path contains characters", app.notice.cget("text"))
+            saved_target.delete(0, tk.END)
+            saved_target.insert(0, r"C:\Missing\Chrome.lnk")
+            root.update()
+            self.assertEqual(saved_save.winfo_manager(), "")
+            saved_name.delete(0, tk.END)
+            saved_name.insert(0, "Browser")
+            root.update()
+            self.assertEqual(saved_save.winfo_manager(), "pack")
+            self.assertGreater(saved_save.winfo_x(), next(widget for widget in saved_save.master.winfo_children()
+                                                           if widget is not saved_save).winfo_x())
+            app.change_shortcut("Chrome", "app", saved_name, saved_target)
+            renamed = app.pill.request.call_args.kwargs["entries"]
+            self.assertEqual(list(renamed), ["Browser"])
+            app.pill.request.call_args.args[1]({"count": 1}, None)
+            app.receive_shortcuts(renamed, None)
+            app.change_shortcut("Browser")
+            self.assertEqual(app.pill.request.call_args.kwargs["entries"], {})
+        finally:
+            root.destroy()
+
+    def test_shortcut_path_preparation_and_warnings(self):
+        from desktop import shortcut_target
+
+        self.assertEqual(shortcut_target("app", '<"C:/Program Files/App/app.lnk">'),
+                         r"C:\Program Files\App\app.lnk")
+        self.assertEqual(shortcut_target("directory", "'C:/Users/Me/Documents'"),
+                         r"C:\Users\Me\Documents")
+        self.assertEqual(shortcut_target("url", " https://www.youtube.com/ "),
+                         "https://www.youtube.com/")
+        for value, message in (("Chrome.lnk", "absolute Windows path"),
+                               (r"C:\Apps\<Chrome>.lnk", "characters Windows does not allow"),
+                               (r"C:\Apps\Chrome.txt", "end in .exe or .lnk"),
+                               ("<C:/Apps/Chrome.lnk", "characters Windows does not allow")):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, message):
+                shortcut_target("app", value)
+        with self.assertRaisesRegex(ValueError, "valid http or https"):
+            shortcut_target("url", "ftp://example.com")
+
     def test_hybrid_tap_hold_and_click(self):
         self.core.command("settings", {"mode": "hybrid", "tap_threshold_ms": 250})
         self.assertEqual(self.core.command("press", {})["state"], "recording")
@@ -362,6 +533,222 @@ class EngineTests(unittest.TestCase):
         self.core.hotkey_events.join()
         self.assertEqual(self.core.state, "locked")
         self.core.command("cancel", {})
+
+    def test_assistant_switches_active_dictation_and_locks_on_tap(self):
+        self.core.command("settings", {"mode": "hybrid", "assistant_enabled": True})
+        self.core.hotkey_enabled = True
+        self.core._hotkey("press", 0)
+        self.core.hotkey_events.join()
+        self.assertEqual(self.core.state, "recording")
+        self.assertFalse(self.core.assistant_session)
+        self.core._hotkey("assistant_switch", 0)
+        self.core._hotkey("assistant_release", 10)
+        self.core.hotkey_events.join()
+        self.assertEqual(self.core.state, "locked")
+        self.assertTrue(self.core.assistant_session)
+        self.assertFalse(self.core.insert)
+        self.assertTrue(self.core.record_history)
+        self.core.command("cancel", {})
+
+    def test_either_chord_finishes_locked_assistant(self):
+        self.core.command("settings", {"mode": "hybrid", "assistant_enabled": True})
+        self.core.command("press", {"assistant": True})
+        self.core.command("release", {"held_ms": 10})
+        self.assertEqual(self.core.state, "locked")
+        self.core.hotkey_enabled = True
+        for actions in (("assistant_press", "assistant_release"),
+                        ("press", "release"),
+                        ("press", "assistant_switch", "assistant_release")):
+            with self.subTest(actions=actions), patch.object(
+                    self.core, "_finish", return_value={"state": "processing"}) as finish:
+                for action in actions:
+                    self.core._hotkey(action, 10)
+                self.core.hotkey_events.join()
+                finish.assert_called_once()
+                self.assertFalse(self.core.hotkey_pending_finish)
+        self.core.command("cancel", {})
+
+    def test_assistant_transcript_skips_cleanup_and_insertion_and_records_assistant_source(self):
+        events = []
+        self.core.listeners.add(events.append)
+        with self.assertRaisesRegex(ValueError, "Enable Assistant"):
+            self.core.command("press", {"assistant": True})
+        self.core.command("settings", {"assistant_enabled": True})
+        self.core.smart_enabled = True
+        with patch.object(self.core, "_ensure_cleaner") as cleaner:
+            self.core.command("press", {"assistant": True, "insert": True})
+        cleaner.assert_not_called()
+        self.assertTrue(self.core.assistant_session)
+        self.assertTrue(self.core.record_history)
+        self.core.foreground = {"process": "Notepad.exe"}
+        result = Future()
+        result.set_result(("Open Chrome.", 1.0))
+        self.core.recording_ms = 100
+        with (tempfile.TemporaryDirectory() as temporary,
+              patch.object(engine.stt, "HISTORY_DIR", Path(temporary)),
+              patch.object(engine.stt, "format_transcript") as format_text,
+              patch.object(engine, "insert_text") as insert):
+            self.core._process([result], time.perf_counter())
+            saved = json.loads(next(Path(temporary).glob("*.jsonl")).read_text().splitlines()[0])
+        format_text.assert_not_called()
+        insert.assert_not_called()
+        self.assertEqual((saved["text"], saved["app"]), ("Open Chrome.", "Assistant"))
+        self.assertTrue(any(event["event"] == "history_added" for event in events))
+        self.assertIn({"event": "assistant_feedback", "value": "Not Found"}, events)
+        self.assertEqual(self.core.state, "idle")
+        self.assertFalse(self.core.assistant_session)
+
+    def test_assistant_opens_only_complete_saved_app_commands(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "Chrome.lnk"
+            target.touch()
+            self.core.shortcuts = {
+                "Google   Chrome": {"type": "app", "target": str(target)},
+                "YouTube": {"type": "url", "target": "https://www.youtube.com/"},
+            }
+            with patch.object(engine.os, "startfile", create=True) as launch:
+                self.assertIsNone(self.core._assistant_action("OPEN google chrome!"))
+                launch.assert_called_once_with(target)
+                for spoken in ("open google chrome please", "please open google chrome",
+                               "open unknown", "open"):
+                    with self.subTest(spoken=spoken):
+                        self.assertEqual(self.core._assistant_action(spoken), "Not Found")
+                launch.assert_called_once()
+                target.unlink()
+                self.assertEqual(self.core._assistant_action("open google chrome."), "Not Found")
+                launch.assert_called_once()
+                punctuated_target = Path(temporary) / "Punctuated.lnk"
+                punctuated_target.touch()
+                self.core.shortcuts["Google Chrome!"] = {"type": "app", "target": str(punctuated_target)}
+                self.assertIsNone(self.core._assistant_action("open google chrome!"))
+                launch.assert_called_with(punctuated_target)
+
+    def test_assistant_launches_saved_app_from_transcript(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "Chrome.lnk"
+            target.touch()
+            self.core.shortcuts = {"Chrome": {"type": "app", "target": str(target)}}
+            self.core.assistant_session = True
+            self.core.record_history = False
+            self.core.recording_ms = 100
+            result = Future()
+            result.set_result(("Open Chrome.", 1.0))
+            events = []
+            self.core.listeners.add(events.append)
+            with patch.object(engine.os, "startfile", create=True) as launch:
+                self.core._process([result], time.perf_counter())
+            launch.assert_called_once_with(target)
+            self.assertTrue(any(event["event"] == "result" for event in events))
+            self.assertFalse(any(event["event"] == "assistant_feedback" for event in events))
+
+    def test_assistant_opens_only_existing_saved_folders_in_explorer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary) / "Code Projects"
+            folder.mkdir()
+            file = Path(temporary) / "Not a folder.txt"
+            file.touch()
+            self.core.shortcuts = {
+                "My   Project": {"type": "directory", "target": str(folder)},
+                "Wrong Type": {"type": "directory", "target": str(file)},
+            }
+            with patch.object(engine.os, "startfile", create=True) as launch:
+                self.assertIsNone(self.core._assistant_action("OPEN my project!"))
+                launch.assert_called_once_with(folder, "explore")
+                for spoken in ("open my project please", "open wrong type", "open project"):
+                    with self.subTest(spoken=spoken):
+                        self.assertEqual(self.core._assistant_action(spoken), "Not Found")
+                launch.assert_called_once()
+                folder.rmdir()
+                self.assertEqual(self.core._assistant_action("open my project."), "Not Found")
+                launch.assert_called_once()
+                folder.mkdir()
+                launch.side_effect = OSError("rejected")
+                self.assertEqual(self.core._assistant_action("open my project"), "Open failed")
+                launch.side_effect = FileNotFoundError()
+                self.assertEqual(self.core._assistant_action("open my project"), "Not Found")
+
+    def test_assistant_folder_command_emits_missing_feedback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary) / "Code"
+            folder.mkdir()
+            self.core.shortcuts = {"Project": {"type": "directory", "target": str(folder)}}
+            self.core.assistant_session = True
+            self.core.record_history = False
+            self.core.recording_ms = 100
+            result = Future()
+            result.set_result(("Open project.", 1.0))
+            events = []
+            self.core.listeners.add(events.append)
+            with patch.object(engine.os, "startfile", create=True) as launch:
+                self.core._process([result], time.perf_counter())
+                launch.assert_called_once_with(folder, "explore")
+                self.assertFalse(any(event["event"] == "assistant_feedback" for event in events))
+                folder.rmdir()
+                events.clear()
+                self.core.assistant_session = True
+                self.core._process([result], time.perf_counter())
+                launch.assert_called_once()
+            self.assertIn({"event": "assistant_feedback", "value": "Not Found"}, events)
+
+    def test_assistant_opens_only_complete_saved_website_commands(self):
+        url = "https://www.youtube.com/"
+        self.core.shortcuts = {"You  Tube": {"type": "url", "target": url}}
+        with patch.object(engine.os, "startfile", create=True) as launch:
+            self.assertIsNone(self.core._assistant_action("OPEN you tube!"))
+            launch.assert_called_once_with(url)
+            for spoken in ("open you tube please", "please open you tube", "open unknown"):
+                with self.subTest(spoken=spoken):
+                    self.assertEqual(self.core._assistant_action(spoken), "Not Found")
+            launch.assert_called_once()
+            launch.side_effect = OSError("no browser association")
+            self.assertEqual(self.core._assistant_action("open you tube."), "Open failed")
+            launch.side_effect = FileNotFoundError()
+            self.assertEqual(self.core._assistant_action("open you tube"), "Open failed")
+
+    def test_assistant_website_launch_result_and_failure_feedback(self):
+        url = "https://www.youtube.com/"
+        self.core.shortcuts = {"YouTube": {"type": "url", "target": url}}
+        self.core.assistant_session = True
+        self.core.record_history = True
+        self.core.recording_ms = 100
+        self.core.foreground = {"process": "Notepad.exe"}
+        result = Future()
+        result.set_result(("Open YouTube.", 1.0))
+        events = []
+        self.core.listeners.add(events.append)
+        with (tempfile.TemporaryDirectory() as temporary,
+              patch.object(engine.stt, "HISTORY_DIR", Path(temporary)),
+              patch.object(engine.os, "startfile", create=True) as launch):
+            self.core._process([result], time.perf_counter())
+            launch.assert_called_once_with(url)
+            self.assertFalse(any(event["event"] == "assistant_feedback" for event in events))
+            saved = json.loads(next(Path(temporary).glob("*.jsonl")).read_text().splitlines()[0])
+            self.assertEqual((saved["text"], saved["app"]), ("Open YouTube.", "Assistant"))
+            events.clear()
+            self.core.assistant_session = True
+            self.core.record_history = False
+            launch.side_effect = OSError("no browser association")
+            self.core._process([result], time.perf_counter())
+        self.assertIn({"event": "assistant_feedback", "value": "Open failed"}, events)
+
+    def test_assistant_reports_app_launch_rejection_in_pill(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "App.exe"
+            target.touch()
+            self.core.shortcuts = {"App": {"type": "app", "target": str(target)}}
+            self.core.assistant_session = True
+            self.core.record_history = False
+            self.core.recording_ms = 100
+            result = Future()
+            result.set_result(("Open app.", 1.0))
+            events = []
+            self.core.listeners.add(events.append)
+            with patch.object(engine.os, "startfile", side_effect=OSError("rejected"), create=True):
+                self.core._process([result], time.perf_counter())
+            self.assertIn({"event": "assistant_feedback", "value": "Open failed"}, events)
+            self.assertEqual(self.core.state, "idle")
+            with patch.object(engine.os, "startfile", side_effect=FileNotFoundError, create=True):
+                self.assertEqual(self.core._assistant_action("open app"), "Not Found")
 
     def test_asr_loads_at_recording_and_unloads_after_idle(self):
         fake_asr = Mock()
@@ -522,6 +909,42 @@ class EngineTests(unittest.TestCase):
             pill.animation_start -= 1
             pill._place()
             self.assertEqual(pill.visual_size, pill_size("recording"))
+        finally:
+            pill.root.after_cancel(pill.tick_after)
+            pill.root.destroy()
+
+    def test_assistant_pill_uses_lime_waveform_and_not_found_feedback(self):
+        if os.name != "nt":
+            self.skipTest("Windows only")
+        with patch.object(Pill, "_connect"):
+            pill = Pill()
+        try:
+            pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "state", "value": "recording", "assistant": True})
+            pill._tick()
+            self.assertTrue(pill.assistant)
+            self.assertEqual(pill.canvas.itemcget(pill.bars[0], "fill"), "#A3E635")
+            pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "state", "value": "idle", "assistant": False})
+            pill.messages.put({"event": "assistant_feedback", "value": "Not Found"})
+            pill._tick()
+            self.assertEqual(pill.canvas.itemcget(pill.shapes["text"], "text"), "Not Found")
+            pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "assistant_feedback", "value": "Open failed"})
+            pill._tick()
+            self.assertEqual(pill.canvas.itemcget(pill.shapes["text"], "text"), "Open failed")
+            pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "state", "value": "recording", "assistant": True})
+            pill._tick()
+            self.assertIsNone(pill.error)
+            self.assertEqual(pill.canvas.itemcget(pill.bars[0], "state"), "normal")
+            pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "state", "value": "idle", "assistant": False})
+            pill.messages.put({"event": "state", "value": "recording", "assistant": False})
+            pill._tick()
+            self.assertIsNone(pill.error)
+            self.assertEqual(pill.canvas.itemcget(pill.bars[0], "fill"), "white")
+            self.assertEqual(pill.canvas.itemcget(pill.bars[0], "state"), "normal")
         finally:
             pill.root.after_cancel(pill.tick_after)
             pill.root.destroy()
@@ -744,6 +1167,38 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(events, ["press", "abort"])
             self.assertFalse(hotkey._on_key(0x5B, 0, 0, 0x101))
             consume.assert_not_called()
+
+    def test_assistant_hotkey_shift_order_and_disabled_fallback(self):
+        events = []
+        hotkey = Hotkey(lambda action, held: events.append(action))
+        hotkey.assistant_enabled = True
+        with patch("windows_support.consume_win_keyup", return_value=True) as consume:
+            for key in (0x10, 0x11, 0x5B):
+                hotkey._on_key(key, 0, 0, 0x100)
+            self.assertEqual(events, ["assistant_press"])
+            for key in (0x10, 0x11, 0x5B):
+                hotkey._on_key(key, 0, 0, 0x101)
+            self.assertEqual(events, ["assistant_press", "assistant_release"])
+            consume.assert_called_once_with(0x5B, 0)
+        events.clear()
+        hotkey.assistant_enabled = False
+        for key in (0x10, 0x11, 0x5B):
+            hotkey._on_key(key, 0, 0, 0x100)
+        self.assertEqual(events, ["press"])
+        for key in (0x5B, 0x11, 0x10):
+            hotkey._on_key(key, 0, 0, 0x101)
+
+    def test_assistant_hotkey_switches_after_ctrl_win(self):
+        events = []
+        hotkey = Hotkey(lambda action, held: events.append(action))
+        hotkey.assistant_enabled = True
+        with patch("windows_support.consume_win_keyup", return_value=True):
+            for key in (0x11, 0x5B, 0x10):
+                hotkey._on_key(key, 0, 0, 0x100)
+            self.assertEqual(events, ["press", "assistant_switch"])
+            for key in (0x5B, 0x10, 0x11):
+                hotkey._on_key(key, 0, 0, 0x101)
+            self.assertEqual(events, ["press", "assistant_switch", "assistant_release"])
 
 
 if __name__ == "__main__":

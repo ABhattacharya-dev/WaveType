@@ -43,6 +43,13 @@ class DownloadTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_gpu_check_does_not_open_a_console(self):
+        with patch.object(model_manager.subprocess, "run",
+                          return_value=Mock(returncode=0, stdout="4096\n")) as run:
+            self.assertTrue(model_manager.gpu_available())
+        self.assertEqual(run.call_args.kwargs["creationflags"],
+                         getattr(model_manager.subprocess, "CREATE_NO_WINDOW", 0))
+
     def test_ignored_range_restarts_instead_of_appending(self):
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / "redux-q8_0.gguf"

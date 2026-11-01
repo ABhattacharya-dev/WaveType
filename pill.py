@@ -101,6 +101,7 @@ class Pill:
         self.messages = queue.Queue()
         self.commands = queue.Queue()
         self.state = "processing"
+        self.assistant = False
         self.level = 0.0
         self.error = None
         self.error_serial = 0
@@ -284,11 +285,15 @@ class Pill:
         label = None
         label_color = "white"
         if self.error:
-            label = ("Insert failed" if "Text insertion failed" in self.error else
+            label = ("Not Found" if self.error == "Not Found" else
+                     "Open failed" if self.error == "Open failed" else
+                     "Insert failed" if "Text insertion failed" in self.error else
                      "Mic error" if "microphone" in self.error.lower() else "Error")
             label_color = "#ff7777"
         elif self.state == "processing":
             label = "Working…" if self.ready else "Starting…"
+            if self.assistant:
+                label_color = "#A3E635"
         self.canvas.itemconfigure(self.shapes["text"], text=label or "", fill=label_color,
                                   state="normal" if label and width >= 75 else "hidden")
         self.canvas.coords(self.shapes["text"], left + width / 2, top + height / 2)
@@ -313,7 +318,8 @@ class Pill:
                                lock_left + height * 0.25, top + height * 0.72)
         active = self.state in ("recording", "locked") and not self.error
         for bar in self.bars:
-            self.canvas.itemconfigure(bar, state="normal" if active else "hidden")
+            self.canvas.itemconfigure(bar, state="normal" if active else "hidden",
+                                      fill="#A3E635" if self.assistant else "white")
         if active:
             activity = max(0.12, min(1, self.display_level * 4))
             now = time.monotonic()
@@ -455,9 +461,13 @@ class Pill:
                 break
             if event["event"] == "state":
                 self.toggle_pending = False
+                if event["value"] in ("recording", "locked") and self.state not in ("recording", "locked"):
+                    self.error = None
+                    self.error_serial += 1
                 if event["value"] == "locked" and self.state != "locked":
                     self.lock_started = time.monotonic()
                 self.state = event["value"]
+                self.assistant = bool(event.get("assistant", False))
                 if self.state in ("recording", "locked") and self.target is None:
                     self.target = user32.GetForegroundWindow()
                 elif self.state == "idle":
@@ -475,6 +485,11 @@ class Pill:
                 self.error_serial += 1
                 if self.ready:
                     self.root.after(3500, self._clear_error, self.error_serial)
+                redraw = True
+            elif event["event"] == "assistant_feedback":
+                self.error = event["value"]
+                self.error_serial += 1
+                self.root.after(3500, self._clear_error, self.error_serial)
                 redraw = True
             elif event["event"] == "response":
                 redraw = not self._dispatch_ui_callback(

@@ -3,11 +3,56 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from user_data import (dictionary_get, dictionary_set, history_append,
+from user_data import (dictionary_get, dictionary_set, shortcuts_get, shortcuts_set, history_append,
                        history_change, history_compact, history_list)
 
 
 class UserDataTests(unittest.TestCase):
+    def test_shortcuts_round_trip_and_name_collisions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            terms, shortcuts = root / "personal_terms.json", root / "shortcuts.json"
+            dictionary_set(terms, root / "vocab.json", "snippets", {"email": "a@example.com"})
+            saved = shortcuts_set(shortcuts, terms, {
+                "Chrome": {"type": "app", "target": r"C:\Missing\Chrome.lnk"},
+                "Project": {"type": "directory", "target": r"C:\Missing\Project"},
+                "YouTube": {"type": "url", "target": "https://www.youtube.com/"}})
+            self.assertEqual(shortcuts_get(shortcuts), saved)
+            self.assertEqual(saved["Chrome"]["target"], r"C:\Missing\Chrome.lnk")
+            with self.assertRaisesRegex(ValueError, "snippet"):
+                shortcuts_set(shortcuts, terms, {" EMAIL ": {"type": "url", "target": "https://example.com"}})
+            with self.assertRaisesRegex(ValueError, "duplicate"):
+                shortcuts_set(shortcuts, terms, {
+                    "My App": {"type": "app", "target": r"C:\Missing\App.exe"},
+                    " my  app ": {"type": "directory", "target": r"C:\Missing\Folder"}})
+            with self.assertRaisesRegex(ValueError, "shortcut"):
+                dictionary_set(terms, root / "vocab.json", "snippets", {"chrome": "text"})
+            dictionary_set(terms, root / "vocab.json", "vocabulary", {"Chrome": ["chrome app"]})
+            self.assertEqual(shortcuts_get(shortcuts), saved)
+            self.assertEqual(dictionary_get(terms, root / "vocab.json")["snippets"],
+                             {"email": "a@example.com"})
+
+    def test_shortcut_target_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path, terms = root / "shortcuts.json", root / "personal_terms.json"
+            for record in ({"type": "app", "target": "relative.exe"},
+                           {"type": "app", "target": r"C:\App.bat"},
+                           {"type": "directory", "target": "relative"},
+                           {"type": "directory", "target": "C:\\Bad\nPath"},
+                           {"type": "url", "target": "file:///C:/secret"},
+                           {"type": "url", "target": "https://"},
+                           {"type": "url", "target": "https://example.com:bad"},
+                           {"type": "url", "target": "https://bad host"}):
+                with self.subTest(record=record), self.assertRaises(ValueError):
+                    shortcuts_set(path, terms, {"name": record})
+            with self.assertRaisesRegex(ValueError, "shortcut names"):
+                shortcuts_set(path, terms, {"bad\nname": {"type": "directory", "target": r"C:\Folder"}})
+            self.assertEqual(shortcuts_get(path), {})
+            path.write_text('{"broken": {"type": "app"}}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "type and target"):
+                shortcuts_get(path)
+
     def test_dictionary_round_trip_and_validation(self):
         with tempfile.TemporaryDirectory() as temporary:
             terms, vocabulary = (Path(temporary) / name for name in ("terms.json", "vocab.json"))

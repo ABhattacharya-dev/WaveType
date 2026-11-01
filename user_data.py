@@ -7,9 +7,14 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 DATA_LOCK = threading.RLock()
+
+
+def _name_key(value):
+    return " ".join(value.casefold().split())
 
 
 def _read_json(path):
@@ -38,7 +43,7 @@ def dictionary_get(terms_path, vocabulary_path):
         return {"snippets": _read_json(terms_path), "vocabulary": _read_json(vocabulary_path)}
 
 
-def dictionary_set(terms_path, vocabulary_path, kind, entries):
+def dictionary_set(terms_path, vocabulary_path, kind, entries, shortcuts_path=None):
     if kind not in ("snippets", "vocabulary") or not isinstance(entries, dict):
         raise ValueError("invalid dictionary kind or entries")
     if len(entries) > 1000:
@@ -48,7 +53,7 @@ def dictionary_set(terms_path, vocabulary_path, kind, entries):
     for key, value in entries.items():
         if not isinstance(key, str) or not key.strip() or len(key) > 120:
             raise ValueError("dictionary keys must be nonempty text up to 120 characters")
-        normalized = " ".join(key.casefold().split())
+        normalized = _name_key(key)
         if normalized in normalized_keys:
             raise ValueError("duplicate dictionary key")
         normalized_keys.add(normalized)
@@ -66,8 +71,65 @@ def dictionary_set(terms_path, vocabulary_path, kind, entries):
                 aliases[candidate] = key
     path = terms_path if kind == "snippets" else vocabulary_path
     with DATA_LOCK:
+        if kind == "snippets":
+            shortcuts_path = shortcuts_path or Path(terms_path).with_name("shortcuts.json")
+            if normalized_keys & {_name_key(name) for name in shortcuts_get(shortcuts_path)}:
+                raise ValueError("snippet key already used by a shortcut")
         _atomic(path, json.dumps(entries, ensure_ascii=False, indent=2) + "\n")
     return {"kind": kind, "count": len(entries)}
+
+
+def shortcuts_get(path):
+    with DATA_LOCK:
+        return _validated_shortcuts(_read_json(path))
+
+
+def _validated_shortcuts(entries):
+    if not isinstance(entries, dict) or len(entries) > 1000:
+        raise ValueError("shortcuts must be an object with at most 1000 entries")
+    normalized = set()
+    clean = {}
+    for name, record in entries.items():
+        if (not isinstance(name, str) or not name.strip() or len(name) > 120 or
+                any(ord(char) < 32 for char in name)):
+            raise ValueError("shortcut names must be nonempty text up to 120 characters")
+        key = _name_key(name)
+        if key in normalized:
+            raise ValueError("duplicate shortcut name")
+        normalized.add(key)
+        if not isinstance(record, dict) or set(record) != {"type", "target"}:
+            raise ValueError("shortcut must have type and target")
+        kind, target = record["type"], record["target"]
+        if kind not in ("app", "directory", "url") or not isinstance(target, str):
+            raise ValueError("invalid shortcut type or target")
+        target = target.strip()
+        if not target or len(target) > 2048 or any(ord(char) < 32 for char in target):
+            raise ValueError("shortcut target must be nonempty text up to 2048 characters")
+        if kind in ("app", "directory"):
+            if not Path(target).is_absolute():
+                raise ValueError("app and folder paths must be absolute")
+            if kind == "app" and Path(target).suffix.lower() not in (".exe", ".lnk"):
+                raise ValueError("app path must end in .exe or .lnk")
+        else:
+            try:
+                url = urlsplit(target)
+                if (url.scheme not in ("http", "https") or not url.hostname or
+                        any(char.isspace() for char in target)):
+                    raise ValueError()
+                url.port
+            except ValueError as exc:
+                raise ValueError("website URL must be a valid http or https address") from exc
+        clean[name.strip()] = {"type": kind, "target": target}
+    return clean
+
+
+def shortcuts_set(path, terms_path, entries):
+    clean = _validated_shortcuts(entries)
+    with DATA_LOCK:
+        if {_name_key(name) for name in clean} & {_name_key(name) for name in _read_json(terms_path)}:
+            raise ValueError("shortcut name already used by a snippet")
+        _atomic(path, json.dumps(clean, ensure_ascii=False, indent=2) + "\n")
+    return clean
 
 
 def _history_files(directory):
