@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import socketserver
 import subprocess
@@ -737,6 +738,28 @@ class DictationEngine:
         self.processing_thread.start()
         return {"state": "processing"}
 
+    def _assistant_action(self, text):
+        command = re.fullmatch(r"open\s+(.+)", text.strip(), flags=re.IGNORECASE)
+        if not command:
+            return "Not Found"
+        requested = " ".join(command.group(1).casefold().split())
+        actions = {" ".join(name.casefold().split()): record for name, record in self.shortcuts.items()}
+        record = actions.get(requested)
+        if record is None:
+            record = actions.get(requested.rstrip(".,!?…:;").rstrip())
+        if record is None or record["type"] != "app":
+            return "Not Found"
+        target = Path(record["target"])
+        if not target.is_file():
+            return "Not Found"
+        try:
+            os.startfile(target)
+        except FileNotFoundError:
+            return "Not Found"
+        except OSError:
+            return "Open failed"
+        return None
+
     def _process(self, futures, release_at):
         timings = {}
         error = lambda message: self.emit("error", {"message": message})
@@ -779,7 +802,9 @@ class DictationEngine:
             timings["release_to_ready_ms"] = round((time.perf_counter() - release_at) * 1000, 1)
             self.emit("result", {"raw": raw, "text": final, "timings": timings})
             if self.assistant_session:
-                self.emit("assistant_feedback", {"value": "Not Found"})
+                feedback = self._assistant_action(raw)
+                if feedback:
+                    self.emit("assistant_feedback", {"value": feedback})
             if self.record_history:
                 try:
                     record = history_append(stt.HISTORY_DIR,

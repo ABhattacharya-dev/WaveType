@@ -286,6 +286,7 @@ class Pill:
         label_color = "white"
         if self.error:
             label = ("Not Found" if self.error == "Not Found" else
+                     "Open failed" if self.error == "Open failed" else
                      "Insert failed" if "Text insertion failed" in self.error else
                      "Mic error" if "microphone" in self.error.lower() else "Error")
             label_color = "#ff7777"

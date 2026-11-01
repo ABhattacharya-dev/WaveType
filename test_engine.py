@@ -529,6 +529,68 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.core.state, "idle")
         self.assertFalse(self.core.assistant_session)
 
+    def test_assistant_opens_only_complete_saved_app_commands(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "Chrome.lnk"
+            target.touch()
+            self.core.shortcuts = {
+                "Google   Chrome": {"type": "app", "target": str(target)},
+                "Project": {"type": "directory", "target": temporary},
+            }
+            with patch.object(engine.os, "startfile", create=True) as launch:
+                self.assertIsNone(self.core._assistant_action("OPEN google chrome!"))
+                launch.assert_called_once_with(target)
+                for spoken in ("open google chrome please", "please open google chrome",
+                               "open project", "open unknown", "open"):
+                    with self.subTest(spoken=spoken):
+                        self.assertEqual(self.core._assistant_action(spoken), "Not Found")
+                launch.assert_called_once()
+                target.unlink()
+                self.assertEqual(self.core._assistant_action("open google chrome."), "Not Found")
+                launch.assert_called_once()
+                punctuated_target = Path(temporary) / "Punctuated.lnk"
+                punctuated_target.touch()
+                self.core.shortcuts["Google Chrome!"] = {"type": "app", "target": str(punctuated_target)}
+                self.assertIsNone(self.core._assistant_action("open google chrome!"))
+                launch.assert_called_with(punctuated_target)
+
+    def test_assistant_launches_saved_app_from_transcript(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "Chrome.lnk"
+            target.touch()
+            self.core.shortcuts = {"Chrome": {"type": "app", "target": str(target)}}
+            self.core.assistant_session = True
+            self.core.record_history = False
+            self.core.recording_ms = 100
+            result = Future()
+            result.set_result(("Open Chrome.", 1.0))
+            events = []
+            self.core.listeners.add(events.append)
+            with patch.object(engine.os, "startfile", create=True) as launch:
+                self.core._process([result], time.perf_counter())
+            launch.assert_called_once_with(target)
+            self.assertTrue(any(event["event"] == "result" for event in events))
+            self.assertFalse(any(event["event"] == "assistant_feedback" for event in events))
+
+    def test_assistant_reports_app_launch_rejection_in_pill(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "App.exe"
+            target.touch()
+            self.core.shortcuts = {"App": {"type": "app", "target": str(target)}}
+            self.core.assistant_session = True
+            self.core.record_history = False
+            self.core.recording_ms = 100
+            result = Future()
+            result.set_result(("Open app.", 1.0))
+            events = []
+            self.core.listeners.add(events.append)
+            with patch.object(engine.os, "startfile", side_effect=OSError("rejected"), create=True):
+                self.core._process([result], time.perf_counter())
+            self.assertIn({"event": "assistant_feedback", "value": "Open failed"}, events)
+            self.assertEqual(self.core.state, "idle")
+            with patch.object(engine.os, "startfile", side_effect=FileNotFoundError, create=True):
+                self.assertEqual(self.core._assistant_action("open app"), "Not Found")
+
     def test_asr_loads_at_recording_and_unloads_after_idle(self):
         fake_asr = Mock()
         with (patch.object(engine, "ParakeetLibraryASR", return_value=fake_asr) as load,
@@ -708,6 +770,10 @@ class EngineTests(unittest.TestCase):
             pill.messages.put({"event": "assistant_feedback", "value": "Not Found"})
             pill._tick()
             self.assertEqual(pill.canvas.itemcget(pill.shapes["text"], "text"), "Not Found")
+            pill.root.after_cancel(pill.tick_after)
+            pill.messages.put({"event": "assistant_feedback", "value": "Open failed"})
+            pill._tick()
+            self.assertEqual(pill.canvas.itemcget(pill.shapes["text"], "text"), "Open failed")
             pill.root.after_cancel(pill.tick_after)
             pill.messages.put({"event": "state", "value": "recording", "assistant": True})
             pill._tick()
