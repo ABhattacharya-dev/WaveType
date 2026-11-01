@@ -116,7 +116,8 @@ def fetch(path, url, expected, progress=None, control=None):
 def gpu_available():
     try:
         result = subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-                                capture_output=True, text=True, timeout=3)
+                                capture_output=True, text=True, timeout=3,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         return result.returncode == 0 and any(int(x.strip()) >= 3500 for x in result.stdout.splitlines())
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return False
