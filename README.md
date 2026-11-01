@@ -19,7 +19,7 @@ WaveType is a local dictation app for Windows 10 and 11. A floating pill and a *
 
 | | |
 | --- | --- |
-| **Local transcription** | Parakeet Redux transcribes on your machine. Speech is not uploaded by WaveType; the app downloads verified model and runtime files after installation. |
+| **Local transcription** | Parakeet Redux transcribes on your machine. Speech is not uploaded by WaveType. Builds made from the current source include the required Parakeet runtime DLL; model weights download after installation. |
 | **Dictate into other apps** | Hold **Ctrl+Win** to record and release to insert text into the focused text box. A quick tap locks recording for hands-free speech. |
 | **Optional Smart cleanup** | Qwen3 4B can improve punctuation and grammar, resolve spoken corrections, or format requested JSON. It runs locally and is off by default. |
 | **Personal vocabulary** | Add recognition aliases and deliberate snippets for names, addresses, and phrases. |
@@ -51,7 +51,7 @@ WaveType is a local dictation app for Windows 10 and 11. A floating pill and a *
 3. Choose your installation folder and shortcuts. Startup on sign-in is off by default.
 4. Launch WaveType to download Parakeet; manage optional Qwen in Settings.
 
-Installation finishes before model downloads. On first launch, WaveType downloads Parakeet; Qwen remains optional. Settings shows Download, Pause / Resume, Cancel, Verify / repair and Delete model controls when relevant, with progress and per-model disk usage.
+Installation finishes before model downloads. On first launch, WaveType downloads Parakeet model weights; Qwen remains optional. Builds made from the current source include the pinned Parakeet DLL, so a missing DLL is repaired locally. The published beta1.03.1 installer still downloads the DLL separately. Settings shows Download, Pause / Resume, Cancel, Verify / repair and Delete model controls when relevant, with progress and per-model disk usage. See [first-run recovery](docs/FIRST_RUN_RECOVERY.md) if setup reports a model, runtime, or certificate error.
 
 Installed builds that include the updater can check for app updates in Settings. Automatic checking and downloading are off by default; an update always asks before installation. Manual checks are rate limited, and installer downloads can be paused, resumed, or canceled. WaveType verifies the release checksum, then closes, updates, and reopens after approval. See [app update details](docs/UPDATES.md).
 
@@ -75,7 +75,7 @@ Smart cleanup can be enabled in the tray or Settings. Downloading its model in S
 
 ## Run from source
 
-**Requirements:** Windows 10/11, Python 3.12, and internet access for first-run model/runtime downloads.
+**Requirements:** Windows 10/11, Python 3.12, and internet access for first-run model downloads. Source runs may also download the pinned Parakeet runtime DLL.
 
 ```powershell
 git clone https://github.com/ABhattacharya-dev/WaveType.git

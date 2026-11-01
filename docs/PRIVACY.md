@@ -12,7 +12,7 @@ Optional Smart cleanup uses Qwen through an authenticated server bound to 127.0.
 
 The engine's authenticated inter-process communication (IPC) also listens only on 127.0.0.1.
 
-After installation, the app downloads missing models and runtimes over HTTPS from Hugging Face and GitHub and verifies pinned SHA-256 hashes. Parakeet starts on first launch; Qwen downloads only when selected in Settings. Pausing retains a partial download; canceling removes it.
+After installation, the app downloads missing model weights and optional Qwen runtimes over HTTPS from Hugging Face and GitHub and verifies pinned SHA-256 hashes. New Windows builds include a pinned Parakeet runtime DLL in the installer; source runs can download its pinned archive. On Windows, the downloader uses the operating system's certificate-chain validation through truststore, while HTTPS verification remains enabled. Parakeet starts on first launch; Qwen downloads only when selected in Settings. Pausing retains a partial download; canceling removes it.
 
 These download services receive ordinary connection information, not dictation.
 
