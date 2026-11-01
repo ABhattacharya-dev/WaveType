@@ -1,5 +1,6 @@
 import hashlib
 import ctypes
+import gc
 import os
 import json
 import queue
@@ -33,12 +34,14 @@ class EngineTests(unittest.TestCase):
         self.models.start()
         self.capture.start()
         self.core = engine.DictationEngine(asr=self.asr, capture=False)
+        self.core.shortcuts = {}
 
     def tearDown(self):
         self.core.close()
         self.capture.stop()
         self.models.stop()
         self.job.stop()
+        gc.collect()
 
     def test_levels_sleep_when_idle_and_wake_for_recording(self):
         core = engine.DictationEngine.__new__(engine.DictationEngine)
@@ -210,6 +213,18 @@ class EngineTests(unittest.TestCase):
 
             root.update()
             snippets = app.dictionary_panels["snippets"]
+            form = snippets.winfo_children()[1]
+            form_save = next(widget for widget in form.winfo_children()
+                             if isinstance(widget, tk.Button) and widget.cget("text") == "Save")
+            self.assertEqual(form_save.winfo_manager(), "")
+            form_key = app.dictionary_forms["snippets"][0]
+            form_key.focus_set()
+            form_key.insert(0, "new")
+            root.update()
+            self.assertEqual(form_save.winfo_manager(), "pack")
+            form_key.delete(0, tk.END)
+            root.update()
+            self.assertEqual(form_save.winfo_manager(), "")
             list_card = snippets.winfo_children()[2]
             row = list_card.winfo_children()[0]
             save, remove, key, _arrow, value = row.winfo_children()
@@ -402,11 +417,17 @@ class EngineTests(unittest.TestCase):
             name = app.shortcut_draft_entry
             target = next(widget for widget in name.master.winfo_children()
                           if isinstance(widget, tk.Entry) and widget is not name)
+            save_button = next(widget for widget in name.master.master.winfo_children()[-1].winfo_children()
+                               if isinstance(widget, tk.Button) and widget.cget("text") == "Save")
+            self.assertEqual(save_button.winfo_manager(), "")
             self.assertEqual(app.entry_text(target), "")
             name.insert(0, "Chrome")
             target.focus_set()
             root.update()
-            target.insert(0, r"C:\Missing\Chrome.lnk")
+            self.assertEqual(save_button.winfo_manager(), "pack")
+            self.assertGreater(save_button.winfo_x(), next(widget for widget in save_button.master.winfo_children()
+                                                            if widget is not save_button).winfo_x())
+            target.insert(0, "<C:/Missing/Chrome.lnk>")
             app.change_shortcut(None, "app", name, target)
             self.assertEqual(app.pill.request.call_args.args[0], "shortcuts_set")
             saved = app.pill.request.call_args.kwargs["entries"]
@@ -422,8 +443,27 @@ class EngineTests(unittest.TestCase):
             saved_name = next(entry for entry in all_entries(app.body) if entry.get() == "Chrome")
             saved_target = next(entry for entry in saved_name.master.winfo_children()
                                 if isinstance(entry, tk.Entry) and entry is not saved_name)
+            saved_save = next(widget for widget in saved_name.master.master.winfo_children()[-1].winfo_children()
+                              if isinstance(widget, tk.Button) and widget.cget("text") == "Save")
+            self.assertEqual(saved_save.winfo_manager(), "")
+            app.pill.request.reset_mock()
+            saved_target.delete(0, tk.END)
+            saved_target.insert(0, r"C:\bad<name>.lnk")
+            root.update()
+            self.assertEqual(saved_save.winfo_manager(), "pack")
+            app.change_shortcut("Chrome", "app", saved_name, saved_target)
+            app.pill.request.assert_not_called()
+            self.assertIn("Path contains characters", app.notice.cget("text"))
+            saved_target.delete(0, tk.END)
+            saved_target.insert(0, r"C:\Missing\Chrome.lnk")
+            root.update()
+            self.assertEqual(saved_save.winfo_manager(), "")
             saved_name.delete(0, tk.END)
             saved_name.insert(0, "Browser")
+            root.update()
+            self.assertEqual(saved_save.winfo_manager(), "pack")
+            self.assertGreater(saved_save.winfo_x(), next(widget for widget in saved_save.master.winfo_children()
+                                                           if widget is not saved_save).winfo_x())
             app.change_shortcut("Chrome", "app", saved_name, saved_target)
             renamed = app.pill.request.call_args.kwargs["entries"]
             self.assertEqual(list(renamed), ["Browser"])
@@ -433,6 +473,24 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(app.pill.request.call_args.kwargs["entries"], {})
         finally:
             root.destroy()
+
+    def test_shortcut_path_preparation_and_warnings(self):
+        from desktop import shortcut_target
+
+        self.assertEqual(shortcut_target("app", '<"C:/Program Files/App/app.lnk">'),
+                         r"C:\Program Files\App\app.lnk")
+        self.assertEqual(shortcut_target("directory", "'C:/Users/Me/Documents'"),
+                         r"C:\Users\Me\Documents")
+        self.assertEqual(shortcut_target("url", " https://www.youtube.com/ "),
+                         "https://www.youtube.com/")
+        for value, message in (("Chrome.lnk", "absolute Windows path"),
+                               (r"C:\Apps\<Chrome>.lnk", "characters Windows does not allow"),
+                               (r"C:\Apps\Chrome.txt", "end in .exe or .lnk"),
+                               ("<C:/Apps/Chrome.lnk", "characters Windows does not allow")):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, message):
+                shortcut_target("app", value)
+        with self.assertRaisesRegex(ValueError, "valid http or https"):
+            shortcut_target("url", "ftp://example.com")
 
     def test_hybrid_tap_hold_and_click(self):
         self.core.command("settings", {"mode": "hybrid", "tap_threshold_ms": 250})

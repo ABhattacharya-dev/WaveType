@@ -3,6 +3,7 @@
 import ctypes
 import faulthandler
 import json
+import ntpath
 import os
 import queue
 import subprocess
@@ -15,6 +16,7 @@ import winreg
 from ctypes import wintypes
 from datetime import date, time as clock_time, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from ipc_protocol import APP_DIR
 from app_update import MANUAL_COOLDOWN, UpdateManager, installed_version
@@ -61,6 +63,30 @@ FONT_FILES = {"sans": ("Figtree", "Figtree.ttf"),
 SHORTCUT_LABELS = {"app": ("App", "App path"),
                    "directory": ("Folder Directory", "Folder path"),
                    "url": ("Website", "Website URL")}
+
+
+def shortcut_target(kind, text):
+    value = text.strip()
+    if kind == "url":
+        try:
+            url = urlsplit(value)
+            if url.scheme not in ("http", "https") or not url.hostname or any(c.isspace() for c in value):
+                raise ValueError()
+            url.port
+        except ValueError as exc:
+            raise ValueError("Website URL must be a valid http or https address.") from exc
+        return value
+    while len(value) >= 2 and (value[0], value[-1]) in (("<", ">"), ("'", "'"), ('"', '"')):
+        value = value[1:-1].strip()
+    value = value.replace("/", "\\")
+    tail = value[2:] if len(value) >= 2 and value[1] == ":" else value
+    if any(char in '<>:"|?*' or ord(char) < 32 for char in tail):
+        raise ValueError("Path contains characters Windows does not allow.")
+    if not Path(value).is_absolute():
+        raise ValueError("Use an absolute Windows path, such as C:\\Apps\\App.exe.")
+    if kind == "app" and Path(value).suffix.casefold() not in (".exe", ".lnk"):
+        raise ValueError("App path must end in .exe or .lnk.")
+    return ntpath.normpath(value)
 
 
 def system_dark():
@@ -910,6 +936,22 @@ class DesktopApp:
                              else "Mishearings, separated by commas")
             self.focus_entry(value_entry, self.colors["side"])
             self.dictionary_forms[kind] = key_entry, value_entry
+
+            def update_form_save(button=save, key=key_entry, value=value_entry):
+                if not button.winfo_exists():
+                    return
+                changed = bool(self.entry_text(key).strip() or self.entry_text(value).strip())
+                if changed and not button.winfo_manager():
+                    button.pack(side="right", before=key, padx=(12, 0))
+                elif not changed and button.winfo_manager():
+                    button.pack_forget()
+
+            for field in (key_entry, value_entry):
+                variable = tk.StringVar(master=self.root, value=field.get())
+                field.configure(textvariable=variable)
+                variable.trace_add("write", lambda *_args, refresh=update_form_save: self.root.after_idle(refresh))
+                field.form_variable = variable
+            update_form_save()
             list_card = tk.Frame(panel, bg=self.colors["card"],
                                  highlightbackground=self.colors["line"], highlightcolor=self.colors["line"],
                                  highlightthickness=1)
@@ -1065,13 +1107,42 @@ class DesktopApp:
             self.focus_entry(target_entry, self.colors["value"])
             actions = tk.Frame(row, bg=self.colors["card"])
             actions.pack(anchor="e", pady=(9, 0))
-            self.button(actions, "Save", lambda old=original, k=kind, n=name_entry, t=target_entry:
-                        self.change_shortcut(old, k, n, t), primary=True).pack(side="right")
+            save = self.button(actions, "Save", lambda old=original, k=kind, n=name_entry, t=target_entry:
+                               self.change_shortcut(old, k, n, t), primary=True)
+
+            def update_save(old=original, k=kind, n=name_entry, t=target_entry,
+                            button=save, container=actions):
+                if not button.winfo_exists():
+                    return
+                name = self.entry_text(n).strip()
+                target = self.entry_text(t).strip()
+                if old is None:
+                    changed = bool(name or target)
+                else:
+                    saved = self.shortcuts.get(old)
+                    if saved is None:
+                        return
+                    try:
+                        changed_target = shortcut_target(k, target) != shortcut_target(k, saved["target"])
+                    except ValueError:
+                        changed_target = target != saved["target"]
+                    changed = name != old or changed_target
+                if changed and not button.winfo_manager():
+                    button.pack(side="right", before=container.winfo_children()[1])
+                elif not changed and button.winfo_manager():
+                    button.pack_forget()
+
+            for field in (name_entry, target_entry):
+                variable = tk.StringVar(master=self.root, value=field.get())
+                field.configure(textvariable=variable)
+                variable.trace_add("write", lambda *_args, refresh=update_save: self.root.after_idle(refresh))
+                field.shortcut_variable = variable
             if original is None:
                 self.button(actions, "Cancel", self.cancel_shortcut).pack(side="right", padx=(0, 8))
             else:
                 self.button(actions, "Delete", lambda old=original: self.change_shortcut(old)).pack(
                     side="right", padx=(0, 8))
+            update_save()
 
     def add_shortcut(self, kind):
         self.shortcut_draft = kind
@@ -1093,6 +1164,11 @@ class DesktopApp:
             target = self.entry_text(target_entry).strip()
             if not name or not target:
                 self.report("Enter a nickname and a path or URL.")
+                return
+            try:
+                target = shortcut_target(kind, target)
+            except ValueError as exc:
+                self.report(str(exc))
                 return
             normalized = " ".join(name.casefold().split())
             if normalized in {" ".join(saved.casefold().split()) for saved in entries}:
