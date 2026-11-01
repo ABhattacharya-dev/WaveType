@@ -308,13 +308,17 @@ class EngineTests(unittest.TestCase):
                                     "cleanup": {"state": "missing"}}}
             app.update_model_cards()
             self.assertIn("Offline", app.model_widgets["asr"][0].cget("text"))
-            self.assertEqual(app.model_widgets["asr"][2].cget("text"), "Download")
+            self.assertEqual(app.model_widgets["asr"][2].cget("text"), "Retry download")
             app.pill.ready = True
             app.model_widgets["asr"][2].invoke()
             self.assertEqual(app.pill.request.call_args.args[0], "model_download")
             self.assertEqual(app.pill.request.call_args.kwargs["model"], "asr")
             app.model_widgets["cleanup"][3].invoke()
             self.assertTrue(app.pill.request.call_args.kwargs["repair"])
+            app.model = {"models": {"asr": {"state": "failed", "installed": True,
+                                            "error": "Parakeet runtime DLL is missing. Choose Verify / repair."}}}
+            app.update_model_cards()
+            self.assertIn("Parakeet runtime DLL is missing", app.model_widgets["asr"][0].cget("text"))
             app.pill.ready = False
             self.assertEqual(app.settings_apply.winfo_manager(), "")
             self.assertEqual(app.mic_combo.cget("bd"), 0)

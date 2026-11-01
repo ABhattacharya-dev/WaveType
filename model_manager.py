@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -55,6 +56,19 @@ def _sha256(path):
     return digest.hexdigest()
 
 
+def _download_context():
+    if os.name == "nt":
+        try:
+            import truststore
+        except ImportError as exc:
+            raise OSError("Windows certificate trust support is unavailable. Reinstall WaveType.") from exc
+        context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    else:
+        context = ssl.create_default_context()
+    context.set_alpn_protocols(["http/1.1"])
+    return context
+
+
 def fetch(path, url, expected, progress=None, control=None):
     path = Path(path)
     if path.is_file() and _sha256(path) == expected:
@@ -64,11 +78,12 @@ def fetch(path, url, expected, progress=None, control=None):
     if partial.exists() and _sha256(partial) == expected:
         partial.replace(path)
         return path
+    context = _download_context()
     for attempt in range(2):
         offset = partial.stat().st_size if partial.exists() else 0
         request = urllib.request.Request(url, headers={"Range": f"bytes={offset}-"} if offset else {})
         try:
-            response = urllib.request.urlopen(request, timeout=30)
+            response = urllib.request.urlopen(request, timeout=30, context=context)
         except urllib.error.HTTPError as exc:
             if offset and exc.code == 416 and attempt == 0:
                 partial.unlink(missing_ok=True)
@@ -143,22 +158,62 @@ def ensure_asr(progress=None, control=None):
     local_cli = stt.RUNTIME / "parakeet-cli.exe"
     if getattr(sys, "frozen", False):
         if not bundled_cli.is_file():
-            raise FileNotFoundError("bundled Parakeet CLI is missing")
+            raise FileNotFoundError("Bundled Parakeet runtime CLI is missing. Reinstall WaveType.")
         if not local_cli.is_file() or _sha256(local_cli) != _sha256(bundled_cli):
             stt.RUNTIME.mkdir(parents=True, exist_ok=True)
             shutil.copy2(bundled_cli, local_cli)
-    fetch(stt.RUNTIME / "redux-q8_0.gguf", *ASR, progress=progress, control=control)
+        bundled_dll = Path(sys._MEIPASS) / "runtime" / "parakeet.dll"
+        if not bundled_dll.is_file():
+            raise FileNotFoundError("Bundled Parakeet runtime DLL is missing. Reinstall WaveType.")
+        if _sha256(bundled_dll) != ASR_LIBRARY_DLL_SHA256:
+            raise ValueError("Bundled Parakeet runtime DLL failed verification. Reinstall WaveType.")
+        if not asr_library_ready():
+            ASR_LIBRARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(bundled_dll, ASR_LIBRARY_PATH)
+            if not asr_library_ready():
+                raise ValueError("Parakeet runtime DLL failed verification after installation. Choose Verify / repair.")
+    try:
+        fetch(stt.RUNTIME / "redux-q8_0.gguf", *ASR, progress=progress, control=control)
+    except (OSError, ValueError) as exc:
+        raise OSError(f"Parakeet model download failed: {exc}. Choose Verify / repair to retry.") from exc
     if not local_cli.is_file():
-        raise FileNotFoundError("parakeet-cli.exe is missing from runtime")
+        raise FileNotFoundError("Parakeet runtime CLI is missing. Choose Verify / repair.")
     if not asr_library_ready():
-        archive = fetch(stt.RUNTIME / "parakeet-lib.zip", *ASR_LIBRARY, progress=progress, control=control)
-        _extract(archive, stt.RUNTIME / "parakeet-lib", control=control)
-        archive.unlink(missing_ok=True)
+        try:
+            archive = fetch(stt.RUNTIME / "parakeet-lib.zip", *ASR_LIBRARY,
+                            progress=progress, control=control)
+            _extract(archive, stt.RUNTIME / "parakeet-lib", control=control)
+            archive.unlink(missing_ok=True)
+            if not asr_library_ready():
+                raise ValueError("The Parakeet runtime DLL failed verification")
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            raise OSError(f"Parakeet runtime download or installation failed: {exc}. "
+                          "Choose Verify / repair to retry.") from exc
     return ASR_LIBRARY_PATH
 
 
 def asr_library_ready():
     return ASR_LIBRARY_PATH.is_file() and _sha256(ASR_LIBRARY_PATH) == ASR_LIBRARY_DLL_SHA256
+
+
+def asr_problem():
+    model = stt.RUNTIME / "redux-q8_0.gguf"
+    if not model.is_file():
+        return "Parakeet model is missing. Choose Download."
+    if _sha256(model) != ASR[1]:
+        return "Parakeet model failed verification. Choose Verify / repair."
+    local_cli = stt.RUNTIME / "parakeet-cli.exe"
+    if not local_cli.is_file():
+        return "Parakeet runtime CLI is missing. Choose Verify / repair."
+    if getattr(sys, "frozen", False):
+        bundled_cli = Path(sys._MEIPASS) / "runtime" / "parakeet-cli.exe"
+        if not bundled_cli.is_file() or _sha256(local_cli) != _sha256(bundled_cli):
+            return "Parakeet runtime CLI failed verification. Choose Verify / repair."
+    if not ASR_LIBRARY_PATH.is_file():
+        return "Parakeet runtime DLL is missing. Choose Verify / repair."
+    if not asr_library_ready():
+        return "Parakeet runtime DLL failed verification. Choose Verify / repair."
+    return ""
 
 
 def _extract(archive, destination, control=None):
@@ -298,7 +353,8 @@ class ModelDownloads:
             paths = self.owned_paths(name)
             weights = stt.RUNTIME / "redux-q8_0.gguf" if name == "asr" else smart.MODEL
             size = sum(file.stat().st_size for path in paths for file in files_under(path))
-            return {"installed": weights.exists() or any(p.is_dir() for p in paths),
+            return {"installed": weights.exists() if name == "asr" else
+                    weights.exists() or any(p.is_dir() for p in paths),
                     "partial": any(p.exists() for p in paths if p.suffix == ".part"), "disk_bytes": size}
         except OSError:
             return {"installed": True, "partial": False, "disk_bytes": None}
@@ -329,15 +385,7 @@ class ModelDownloads:
 
     def _ready(self, name, tier=None):
         if name == "asr":
-            local_cli = stt.RUNTIME / "parakeet-cli.exe"
-            bundled_cli = Path(getattr(sys, "_MEIPASS", "")) / "runtime" / "parakeet-cli.exe"
-            cli_ready = (local_cli.is_file() and
-                         (not getattr(sys, "frozen", False) or
-                          bundled_cli.is_file() and _sha256(local_cli) == _sha256(bundled_cli)))
-            return (cli_ready and
-                    (stt.RUNTIME / "redux-q8_0.gguf").is_file() and
-                    _sha256(stt.RUNTIME / "redux-q8_0.gguf") == ASR[1] and
-                    asr_library_ready())
+            return not asr_problem()
         gpu = (tier if tier is not None else self.tier()) != "cpu" and gpu_available()
         packages = (GPU, CUDART) if gpu else (CPU,)
         destination = smart.RUNTIME / ("smart" if gpu else "smart-cpu")
@@ -469,9 +517,15 @@ class ModelDownloads:
             control()
             if not download:
                 error = self.intents.get(name + "_error", "")
-                if self._facts(name)["installed"] and self.intents.get(name) not in ("pause", "cancel"):
+                facts = self._facts(name)
+                if name == "asr" and self.intents.get(name) != "pause":
+                    error = error or asr_problem()
+                elif facts["installed"] and self.intents.get(name) not in ("pause", "cancel"):
                     error = error or "Installed files need repair. Choose Verify / repair."
-                self._set(name, state="failed" if error else "paused" if self.intents.get(name) == "pause" or self._facts(name)["partial"] else "missing", operation="", error=error)
+                failed = bool(self.intents.get(name + "_error")) or bool(error and facts["installed"])
+                self._set(name, state="failed" if failed else "paused" if
+                          self.intents.get(name) == "pause" or facts["partial"] else "missing",
+                          operation="", error=error)
                 return
             self._set(name, state="downloading", operation="repair" if repair else "download")
             if name == "asr":

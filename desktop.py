@@ -41,6 +41,8 @@ def model_controls(value):
         return ("verify", "delete")
     if value.get("partial"):
         return ("resume", "cancel")
+    if state == "failed":
+        return ("retry",)
     return ("download",)
 
 
@@ -676,9 +678,7 @@ class DesktopApp:
         asr = self.model.get("models", {}).get("asr", {})
         error = self.model.get("capture_error") or getattr(self, "setup_error", "")
         if asr.get("state") in ("missing", "failed", "paused"):
-            error = "Model unavailable. Download Parakeet in Settings."
-            if asr.get("error"):
-                error += " " + asr["error"]
+            error = asr.get("error") or "Parakeet is not ready. Open Settings to download or repair it."
         self.issue_label.configure(text=error)
         if error:
             if not self.issue_button.winfo_manager():
@@ -1535,7 +1535,7 @@ class DesktopApp:
                 amount = (f"{received // (1024 * 1024)} / {total // (1024 * 1024)} MiB"
                           if total else f"{received // (1024 * 1024)} MiB")
                 label = f"Downloading {filename or 'files'} · {amount}"
-            elif state == "failed":
+            elif state in ("failed", "missing") and value.get("error"):
                 label = value.get("error") or "Model operation failed. Retry to repair it."
             else:
                 label = {"ready": ("Ready (previous runtime; use Verify / repair for a full check)"
@@ -1558,13 +1558,15 @@ class DesktopApp:
                 bar.configure(mode="determinate", value=100 * received / total if total else
                               (100 if state == "ready" else 0))
             visible = model_controls(value)
-            buttons = {"download": start, "resume": start, "verify": verify, "pause": pause,
+            buttons = {"download": start, "resume": start, "retry": start,
+                       "verify": verify, "pause": pause,
                        "cancel": cancel, "delete": delete}
             focused = self.root.focus_get()
             for widget in (start, verify, pause, cancel, delete):
                 widget.pack_forget()
-            start.configure(text="Resume" if "resume" in visible else "Download",
-                            image=self.model_icon("resume" if "resume" in visible else "download"))
+            start.configure(text="Resume" if "resume" in visible else
+                            "Retry download" if "retry" in visible else "Download",
+                            image=self.model_icon("resume" if "resume" in visible or "retry" in visible else "download"))
             if name in getattr(self, "model_pending", set()):
                 visible = ()
             for action in visible:
