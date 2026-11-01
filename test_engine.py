@@ -249,6 +249,15 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(app.pill.request.call_args.kwargs["entries"],
                              {"Parakeet": ["parakeet redux", "parakeet redox"]})
 
+            app.report("Dictionary saved.")
+            root.update()
+            app.render_page()
+            root.update()
+            app.report("That key already exists.")
+            root.update()
+            self.assertEqual(app.notice.cget("text"), "That key already exists.")
+            self.assertIs(app.content.winfo_children()[-1], app.notice)
+
             app.navigate("History")
             self.assertIs(app.shell, shell)
             app.navigate("Settings")

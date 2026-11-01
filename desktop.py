@@ -1608,6 +1608,7 @@ class DesktopApp:
             self.notice = self.label(self.content, "", 9, color="text", wraplength=400)
         self.notice.configure(text=message, bg=self.colors["button"])
         self.notice.place(relx=1, rely=1, x=-24, y=-20, anchor="se")
+        self.notice.lift()
         if hasattr(self, "notice_timer"):
             self.root.after_cancel(self.notice_timer)
         self.notice_timer = self.root.after(3500, self.notice.place_forget)
