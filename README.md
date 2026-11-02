@@ -163,4 +163,4 @@ These documents and templates are available to contributors:
 
 ## License and credits
 
-WaveType project code is licensed under the [MIT License](LICENSE). Third-party models, runtimes, fonts, and artwork retain their own terms; see [third-party notices](LICENSES.md). The original beta 1 installer predates this licence update; beta 1.01 includes the project licence text.
+WaveType project code is licensed under the [MIT License](LICENSE). Third-party models, runtimes, fonts, and artwork retain their own terms; see [third-party notices](LICENSES.md). The original beta 1 installer predates this licence update; beta 1.01 includes the project licence text
